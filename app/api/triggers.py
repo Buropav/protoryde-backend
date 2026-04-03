@@ -10,11 +10,11 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from backend.core.database import get_db
-from backend.core.models import AuditLog, Claim, Policy, Rider
-from backend.triggers.fraud_engine import FraudEngine, TRIGGER_THRESHOLDS
-from backend.triggers.premium_service import PremiumService
-from backend.triggers.weather_service import FIXTURE_VERSION, WeatherService, ZONES
+from app.core.database import get_db
+from app.core.models import AuditLog, Claim, Policy, Rider
+from app.triggers.fraud_engine import FraudEngine, TRIGGER_THRESHOLDS
+from app.triggers.premium_service import PremiumService
+from app.triggers.weather_service import FIXTURE_VERSION, WeatherService, ZONES
 
 router = APIRouter(prefix="/api", tags=["simulation_and_integrations"])
 DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")

@@ -1,8 +1,0 @@
-fastapi
-uvicorn
-pydantic
-requests
-apscheduler
-python-dotenv
-sqlalchemy
-reportlab

@@ -1,7 +1,7 @@
 from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, ForeignKey, JSON
 from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
-from backend.core.database import Base
+from app.core.database import Base
 
 class Rider(Base):
     __tablename__ = "riders"

@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from typing import Any, Dict, List
 
-from backend.triggers.weather_service import FIXTURE_VERSION
+from app.triggers.weather_service import FIXTURE_VERSION
 
 ZONE_BASE_PREMIUM = {
     "Whitefield": 55.0,

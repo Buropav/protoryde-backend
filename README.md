@@ -1,11 +1,12 @@
 # ProtoRyde Backend
 
-This repository now contains the consolidated backend used for the hackathon demo.
+Consolidated backend repository for the hackathon.
 
-## Layout
-- `backend/`: current API, trigger engine, simulation flow, policy/claims persistence, PDF document endpoint
-- `legacy_v1/`: preserved earlier backend modules (`ml_service.py`, `pdf_service.py`, `train.py`, etc.)
-- `main.py`: root ASGI entrypoint proxying to `backend.main:app`
+## Structure
+- `app/` -> active FastAPI backend (API routes, trigger engine, persistence, tests)
+- `legacy/` -> preserved earlier backend implementation (reference only)
+- `main.py` -> root ASGI entrypoint (`app.main:app`)
+- `requirements.txt` -> single dependency source for this repo
 
 ## Run
 ```bash
@@ -15,7 +16,7 @@ pip install -r requirements.txt
 uvicorn main:app --reload --port 8000
 ```
 
-## Critical Endpoints
+## Demo-Critical Endpoints
 - `POST /api/demo/bootstrap`
 - `POST /api/triggers/simulate`
 - `GET /api/claims/{rider_id}`

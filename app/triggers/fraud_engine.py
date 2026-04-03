@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 from uuid import uuid4
 
-from backend.triggers.weather_service import FIXTURE_VERSION, ZONES
+from app.triggers.weather_service import FIXTURE_VERSION, ZONES
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
 AUDIT_LOG_FILE = os.path.join(DATA_DIR, "simulation_audit.log")

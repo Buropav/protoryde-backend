@@ -18,7 +18,7 @@ Base = declarative_base()
 
 def init_db():
     # Import model metadata right before create_all to avoid circular imports.
-    from backend.core import models  # noqa: F401
+    from app.core import models  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
 

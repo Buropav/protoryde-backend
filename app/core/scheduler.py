@@ -1,7 +1,7 @@
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
-from backend.triggers.weather_service import WeatherService
-from backend.triggers.fraud_engine import FraudEngine
+from app.triggers.weather_service import WeatherService
+from app.triggers.fraud_engine import FraudEngine
 import logging
 
 logger = logging.getLogger(__name__)

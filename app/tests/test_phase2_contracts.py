@@ -1,8 +1,8 @@
 import unittest
 
-from backend.triggers.fraud_engine import FraudEngine
-from backend.triggers.premium_service import PremiumService
-from backend.triggers.weather_service import WeatherService
+from app.triggers.fraud_engine import FraudEngine
+from app.triggers.premium_service import PremiumService
+from app.triggers.weather_service import WeatherService
 
 
 class TestPhase2Contracts(unittest.TestCase):

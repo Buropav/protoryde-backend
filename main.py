@@ -1,10 +1,10 @@
-"""Root entrypoint for ProtoRyde backend.
+"""Root entrypoint for ProtoRyde app.
 
 Run:
   uvicorn main:app --reload --port 8000
 """
 
-from backend.main import app
+from app.main import app
 
 if __name__ == "__main__":
     import uvicorn
