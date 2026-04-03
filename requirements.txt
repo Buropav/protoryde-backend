@@ -12,3 +12,4 @@ shap
 joblib
 pandas
 numpy
+httpx

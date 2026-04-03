@@ -171,6 +171,14 @@ class PolicyActivateRequest(BaseModel):
     zone_risk_score: Optional[float] = None
 
 
+class DemoBootstrapRequest(BaseModel):
+    rider_id: str = "rdr_demo_hsr"
+    rider_name: str = "Pranav"
+    zone: str = "HSR Layout"
+    upi_id: str = "pranav@okicici"
+    exclusions_accepted: bool = True
+
+
 @router.get("/exclusions")
 def get_exclusions():
     return {"version": EXCLUSIONS_VERSION, "items": EXCLUSIONS}
@@ -308,6 +316,79 @@ def activate_policy(payload: PolicyActivateRequest, db: Session = Depends(get_db
         "premium_engine": premium["engine"],
         "exclusions_version": EXCLUSIONS_VERSION,
         "exclusions_acknowledged_at": policy.exclusions_acknowledged_at.isoformat() if policy.exclusions_acknowledged_at else None,
+    }
+
+
+@router.post("/demo/bootstrap")
+def bootstrap_demo(payload: DemoBootstrapRequest, db: Session = Depends(get_db)):
+    if payload.zone not in ZONES:
+        raise HTTPException(status_code=422, detail={"error": "UNSUPPORTED_ZONE", "message": "Unsupported zone"})
+    if not payload.exclusions_accepted:
+        raise HTTPException(
+            status_code=422,
+            detail={"error": "EXCLUSIONS_NOT_ACKNOWLEDGED", "message": "Demo bootstrap requires exclusions acceptance"},
+        )
+
+    rider = db.query(Rider).filter(Rider.id == payload.rider_id).first()
+    if rider is None:
+        rider = Rider(
+            id=payload.rider_id,
+            name=payload.rider_name,
+            phone=f"9{uuid4().hex[:9]}",
+            delhivery_partner_id=f"DEL-{uuid4().hex[:8].upper()}",
+            zone=payload.zone,
+            upi_id=payload.upi_id,
+            avg_daily_earnings=1050.0,
+            claim_rate_12wk=0.6,
+            fraud_flag_count=0,
+            kyc_verified=True,
+        )
+        db.add(rider)
+        db.flush()
+    else:
+        rider.name = payload.rider_name
+        rider.zone = payload.zone
+        rider.upi_id = payload.upi_id
+
+    policy = _ensure_rider_and_policy(db, rider_id=payload.rider_id, zone=payload.zone, exclusions_acknowledged=True)
+    premium = _predict_premium(zone=payload.zone, forecast_features={}, rider_features={}, prefer_ml=True)
+    policy.base_premium = premium["base_premium"]
+    policy.final_premium = premium["final_premium"]
+    policy.premium_breakdown = premium["adjustments"]
+    policy.status = "active"
+    policy.exclusions_acknowledged_at = _now()
+
+    db.add(
+        AuditLog(
+            entity_type="Demo",
+            entity_id=payload.rider_id,
+            action="DEMO_BOOTSTRAPPED",
+            metadata_json={"rider_id": payload.rider_id, "zone": payload.zone, "policy_id": policy.id},
+        )
+    )
+    db.commit()
+    db.refresh(policy)
+
+    return {
+        "status": "ok",
+        "rider": {
+            "rider_id": rider.id,
+            "name": rider.name,
+            "zone": rider.zone,
+            "upi_id": rider.upi_id,
+            "kyc_verified": rider.kyc_verified,
+        },
+        "policy": {
+            "policy_id": policy.id,
+            "status": policy.status,
+            "base_premium": policy.base_premium,
+            "final_premium": policy.final_premium,
+            "premium_engine": premium["engine"],
+            "exclusions_version": EXCLUSIONS_VERSION,
+            "exclusions_acknowledged_at": policy.exclusions_acknowledged_at.isoformat()
+            if policy.exclusions_acknowledged_at
+            else None,
+        },
     }
 
 

@@ -10,6 +10,7 @@ Feature-complete backend repository for the hackathon.
   - `services/` pricing, ML+SHAP prediction, PDF generation, model training utility
   - `tests/` contract tests
 - `docs/API_CONTRACT.md` -> frontend/backend integration contract
+- `docs/BACKEND_RUNBOOK.md` -> backend owner runbook + curl payloads + error handling
 - `main.py` -> root ASGI entrypoint (`app.main:app`)
 - `requirements.txt` -> single dependency source
 
@@ -33,3 +34,9 @@ uvicorn main:app --reload --port 8000
 - `GET /api/claims/{rider_id}`
 - `GET /api/policies/{rider_id}/current`
 - `GET /api/policies/{rider_id}/current/document`
+
+## Reliability Tests
+```bash
+python3 -m unittest app.tests.test_phase2_contracts -v
+python3 -m unittest app.tests.test_api_endpoints -v
+```
