@@ -14,8 +14,8 @@ from app.core.database import get_db
 from app.core.models import AuditLog, Claim, Policy, Rider
 from app.services.ml_service import is_ml_ready, ml_status, predict_with_shap, zone_risk_score
 from app.services.policy_pdf import generate_policy_pdf
+from app.services.pricing_service import PricingService
 from app.triggers.fraud_engine import FraudEngine, TRIGGER_THRESHOLDS
-from app.triggers.premium_service import PremiumService
 from app.triggers.weather_service import FIXTURE_VERSION, WeatherService, ZONES
 
 router = APIRouter(prefix="/api", tags=["simulation_and_integrations"])
@@ -74,7 +74,7 @@ def _predict_premium(
             "model_status": ml_payload["model_status"],
         }
 
-    rule_payload = PremiumService.predict(
+    rule_payload = PricingService.predict(
         {
             "zone": zone,
             "forecast_features": forecast_features or {},

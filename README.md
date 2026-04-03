@@ -6,9 +6,10 @@ Feature-complete backend repository for the hackathon.
 - `app/` -> active FastAPI backend
   - `api/` endpoints
   - `core/` database models + scheduler
-  - `triggers/` weather + fraud + premium logic
-  - `services/` ML+SHAP prediction, policy PDF generation, model training utility
+  - `triggers/` weather + fraud trigger logic
+  - `services/` pricing, ML+SHAP prediction, PDF generation, model training utility
   - `tests/` contract tests
+- `docs/API_CONTRACT.md` -> frontend/backend integration contract
 - `main.py` -> root ASGI entrypoint (`app.main:app`)
 - `requirements.txt` -> single dependency source
 

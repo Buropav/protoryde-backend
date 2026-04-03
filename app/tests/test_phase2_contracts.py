@@ -1,7 +1,7 @@
 import unittest
 
 from app.triggers.fraud_engine import FraudEngine
-from app.triggers.premium_service import PremiumService
+from app.services.pricing_service import PricingService
 from app.triggers.weather_service import WeatherService
 
 
@@ -36,8 +36,8 @@ class TestPhase2Contracts(unittest.TestCase):
         self.assertEqual(result["recommended_payout"], 840.0)
 
     def test_zone_premium_differs(self):
-        hsr = PremiumService.predict({"zone": "HSR Layout", "forecast_features": {}, "rider_features": {}})
-        whitefield = PremiumService.predict({"zone": "Whitefield", "forecast_features": {}, "rider_features": {}})
+        hsr = PricingService.predict({"zone": "HSR Layout", "forecast_features": {}, "rider_features": {}})
+        whitefield = PricingService.predict({"zone": "Whitefield", "forecast_features": {}, "rider_features": {}})
         self.assertNotEqual(hsr["final_premium"], whitefield["final_premium"])
         self.assertGreater(hsr["final_premium"], whitefield["final_premium"])
 
