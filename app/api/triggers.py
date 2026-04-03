@@ -12,6 +12,8 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.models import AuditLog, Claim, Policy, Rider
+from app.services.ml_service import is_ml_ready, ml_status, predict_with_shap, zone_risk_score
+from app.services.policy_pdf import generate_policy_pdf
 from app.triggers.fraud_engine import FraudEngine, TRIGGER_THRESHOLDS
 from app.triggers.premium_service import PremiumService
 from app.triggers.weather_service import FIXTURE_VERSION, WeatherService, ZONES
@@ -43,6 +45,53 @@ def _read_json(name: str) -> Dict[str, Any]:
         return json.load(fh)
 
 
+def _predict_premium(
+    zone: str,
+    forecast_features: Optional[Dict[str, Any]] = None,
+    rider_features: Optional[Dict[str, Any]] = None,
+    prefer_ml: bool = True,
+    explicit_zone_risk: Optional[float] = None,
+    weather_severity: Optional[float] = None,
+    claim_history: Optional[float] = None,
+) -> Dict[str, Any]:
+    if prefer_ml and is_ml_ready():
+        ml_payload = predict_with_shap(
+            zone=zone,
+            weather_severity=float(
+                weather_severity if weather_severity is not None else (forecast_features or {}).get("weather_severity", 2.0)
+            ),
+            claim_history=float(
+                claim_history if claim_history is not None else (rider_features or {}).get("claim_history", 1.0)
+            ),
+            explicit_zone_risk=explicit_zone_risk,
+        )
+        return {
+            "engine": "ml_shap",
+            "zone": zone,
+            "base_premium": ml_payload["base_premium"],
+            "final_premium": ml_payload["final_premium"],
+            "adjustments": ml_payload["adjustments"],
+            "model_status": ml_payload["model_status"],
+        }
+
+    rule_payload = PremiumService.predict(
+        {
+            "zone": zone,
+            "forecast_features": forecast_features or {},
+            "rider_features": rider_features or {},
+            "is_simulated": True,
+        }
+    )
+    return {
+        "engine": "rule_engine",
+        "zone": zone,
+        "base_premium": rule_payload["base_premium"],
+        "final_premium": rule_payload["final_premium"],
+        "adjustments": rule_payload["adjustments"],
+        "model_status": ml_status(),
+    }
+
+
 def _ensure_rider_and_policy(db: Session, rider_id: str, zone: str, exclusions_acknowledged: bool = True) -> Policy:
     rider = db.query(Rider).filter(Rider.id == rider_id).first()
     if rider is None:
@@ -70,7 +119,7 @@ def _ensure_rider_and_policy(db: Session, rider_id: str, zone: str, exclusions_a
         .first()
     )
     if policy is None:
-        premium = PremiumService.predict({"zone": zone, "forecast_features": {}, "rider_features": {}})
+        premium = _predict_premium(zone=zone, forecast_features={}, rider_features={}, prefer_ml=True)
         policy = Policy(
             id=f"pol_{uuid4().hex[:10]}",
             rider_id=rider_id,
@@ -87,91 +136,15 @@ def _ensure_rider_and_policy(db: Session, rider_id: str, zone: str, exclusions_a
     return policy
 
 
-def _build_policy_pdf_bytes(rider: Rider, policy: Policy) -> bytes:
-    try:
-        from reportlab.lib.pagesizes import A4
-        from reportlab.pdfgen import canvas
-    except ImportError as exc:
-        raise HTTPException(
-            status_code=500,
-            detail={
-                "error": "PDF_ENGINE_MISSING",
-                "message": "reportlab is required for PDF generation. Install with: pip install reportlab",
-            },
-        ) from exc
-
-    buffer = BytesIO()
-    pdf = canvas.Canvas(buffer, pagesize=A4)
-    width, height = A4
-
-    left = 50
-    y = height - 50
-    line_gap = 16
-
-    def line(text: str, size: int = 11, bold: bool = False):
-        nonlocal y
-        if y < 60:
-            pdf.showPage()
-            y = height - 50
-        font = "Helvetica-Bold" if bold else "Helvetica"
-        pdf.setFont(font, size)
-        pdf.drawString(left, y, text)
-        y -= line_gap
-
-    line("ProtoRyde Policy Document", size=16, bold=True)
-    line(f"Generated At: {_now().isoformat()}", size=10)
-    line(f"Policy ID: {policy.id}")
-    line(f"Rider ID: {rider.id}")
-    line(f"Rider Name: {rider.name}")
-    line(f"Zone: {rider.zone}")
-    line("")
-    line("Policy Terms", bold=True)
-    line(f"Status: {policy.status}")
-    line(f"Coverage Cap: INR {policy.coverage_cap}")
-    line(f"Base Premium: INR {policy.base_premium}")
-    line(f"Final Premium: INR {policy.final_premium}")
-    line(f"Week Start: {policy.week_start_date.isoformat() if policy.week_start_date else 'N/A'}")
-    line(f"Week End: {policy.week_end_date.isoformat() if policy.week_end_date else 'N/A'}")
-    line(
-        "Exclusions Acknowledged At: "
-        + (policy.exclusions_acknowledged_at.isoformat() if policy.exclusions_acknowledged_at else "NOT ACKNOWLEDGED")
-    )
-    line("")
-    line("Premium Breakdown", bold=True)
-    breakdown = policy.premium_breakdown or []
-    if breakdown:
-        for item in breakdown:
-            factor = item.get("factor", "unknown_factor")
-            amount = item.get("amount", 0.0)
-            reason = item.get("reason", "")
-            line(f"- {factor}: INR {amount} ({reason})", size=10)
-    else:
-        line("- No dynamic adjustments", size=10)
-    line("")
-    line("Coverage Exclusions", bold=True)
-    line(f"Exclusions Version: {EXCLUSIONS_VERSION}", size=10)
-    for item in EXCLUSIONS:
-        line(f"- {item}", size=10)
-    line("")
-    line("Parametric Trigger Thresholds", bold=True)
-    line(f"- Heavy Rain: >= {TRIGGER_THRESHOLDS['HEAVY_RAIN']} mm")
-    line(f"- Extreme Heat: >= {TRIGGER_THRESHOLDS['EXTREME_HEAT']} C")
-    line(f"- Severe AQI: >= {TRIGGER_THRESHOLDS['SEVERE_AQI']}")
-    line(f"- Branch Closure: >= {TRIGGER_THRESHOLDS['BRANCH_CLOSURE']}%")
-    line(f"- Delhivery Advisory Proxy: >= {TRIGGER_THRESHOLDS['DELHIVERY_ADVISORY']}% cancellations")
-    line("")
-    line("Fixture Version: " + FIXTURE_VERSION, size=10)
-
-    pdf.save()
-    buffer.seek(0)
-    return buffer.getvalue()
-
-
 class PremiumPredictRequest(BaseModel):
     zone: str = "HSR Layout"
     forecast_features: Dict[str, Any] = Field(default_factory=dict)
     rider_features: Dict[str, Any] = Field(default_factory=dict)
     is_simulated: bool = True
+    prefer_ml: bool = True
+    weather_severity: Optional[float] = None
+    claim_history: Optional[float] = None
+    zone_risk_score: Optional[float] = None
 
 
 class TriggerSimulateRequest(BaseModel):
@@ -192,6 +165,10 @@ class PolicyActivateRequest(BaseModel):
     exclusions_accepted: bool
     forecast_features: Dict[str, Any] = Field(default_factory=dict)
     rider_features: Dict[str, Any] = Field(default_factory=dict)
+    prefer_ml: bool = True
+    weather_severity: Optional[float] = None
+    claim_history: Optional[float] = None
+    zone_risk_score: Optional[float] = None
 
 
 @router.get("/exclusions")
@@ -199,11 +176,35 @@ def get_exclusions():
     return {"version": EXCLUSIONS_VERSION, "items": EXCLUSIONS}
 
 
+@router.get("/premium/model-status")
+def get_model_status():
+    status = ml_status()
+    status["zone_defaults"] = {zone: zone_risk_score(zone) for zone in ZONES.keys()}
+    return status
+
+
 @router.post("/premium/predict")
 def predict_premium(payload: PremiumPredictRequest):
     if payload.zone not in ZONES:
         raise HTTPException(status_code=422, detail={"error": "UNSUPPORTED_ZONE", "message": "Zone is not supported"})
-    return PremiumService.predict(payload.model_dump())
+    premium = _predict_premium(
+        zone=payload.zone,
+        forecast_features=payload.forecast_features,
+        rider_features=payload.rider_features,
+        prefer_ml=payload.prefer_ml,
+        explicit_zone_risk=payload.zone_risk_score,
+        weather_severity=payload.weather_severity,
+        claim_history=payload.claim_history,
+    )
+    return {
+        "zone": payload.zone,
+        "engine": premium["engine"],
+        "base_premium": premium["base_premium"],
+        "final_premium": premium["final_premium"],
+        "adjustments": premium["adjustments"],
+        "currency": "INR",
+        "model_status": premium["model_status"],
+    }
 
 
 @router.get("/weather/current/{zone}")
@@ -269,13 +270,14 @@ def activate_policy(payload: PolicyActivateRequest, db: Session = Depends(get_db
         )
 
     policy = _ensure_rider_and_policy(db, rider_id=payload.rider_id, zone=payload.zone, exclusions_acknowledged=True)
-    premium = PremiumService.predict(
-        {
-            "zone": payload.zone,
-            "forecast_features": payload.forecast_features,
-            "rider_features": payload.rider_features,
-            "is_simulated": True,
-        }
+    premium = _predict_premium(
+        zone=payload.zone,
+        forecast_features=payload.forecast_features,
+        rider_features=payload.rider_features,
+        prefer_ml=payload.prefer_ml,
+        explicit_zone_risk=payload.zone_risk_score,
+        weather_severity=payload.weather_severity,
+        claim_history=payload.claim_history,
     )
 
     policy.base_premium = premium["base_premium"]
@@ -303,6 +305,7 @@ def activate_policy(payload: PolicyActivateRequest, db: Session = Depends(get_db
         "base_premium": policy.base_premium,
         "final_premium": policy.final_premium,
         "premium_breakdown": policy.premium_breakdown,
+        "premium_engine": premium["engine"],
         "exclusions_version": EXCLUSIONS_VERSION,
         "exclusions_acknowledged_at": policy.exclusions_acknowledged_at.isoformat() if policy.exclusions_acknowledged_at else None,
     }
@@ -538,7 +541,32 @@ def download_current_policy_document(rider_id: str, db: Session = Depends(get_db
     if policy is None:
         raise HTTPException(status_code=404, detail={"error": "POLICY_NOT_FOUND", "message": "No active policy"})
 
-    pdf_bytes = _build_policy_pdf_bytes(rider, policy)
+    pdf_bytes = generate_policy_pdf(
+        policy_data={
+            "id": policy.id,
+            "status": policy.status,
+            "base_premium": policy.base_premium,
+            "final_premium": policy.final_premium,
+            "premium_breakdown": policy.premium_breakdown,
+            "created_at": policy.created_at,
+        },
+        rider_data={
+            "name": rider.name,
+            "phone": rider.phone,
+            "delhivery_partner_id": rider.delhivery_partner_id,
+            "zone": rider.zone,
+        },
+        exclusions=EXCLUSIONS,
+        exclusions_version=EXCLUSIONS_VERSION,
+        thresholds={
+            "HEAVY_RAIN_MM": TRIGGER_THRESHOLDS["HEAVY_RAIN"],
+            "EXTREME_HEAT_C": TRIGGER_THRESHOLDS["EXTREME_HEAT"],
+            "SEVERE_AQI": TRIGGER_THRESHOLDS["SEVERE_AQI"],
+            "BRANCH_CLOSURE_PERCENT": TRIGGER_THRESHOLDS["BRANCH_CLOSURE"],
+            "DELHIVERY_ADVISORY_PERCENT": TRIGGER_THRESHOLDS["DELHIVERY_ADVISORY"],
+        },
+        fixture_version=FIXTURE_VERSION,
+    )
     filename = f"protoryde-policy-{policy.id}.pdf"
     db.add(
         AuditLog(
