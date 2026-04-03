@@ -1,0 +1,20 @@
+{
+  "HSR Layout": {
+    "total_orders": 18,
+    "cancelled_orders": 14,
+    "cancellation_rate": 0.78,
+    "status": "advisory_active"
+  },
+  "Whitefield": {
+    "total_orders": 24,
+    "cancelled_orders": 2,
+    "cancellation_rate": 0.08,
+    "status": "normal"
+  },
+  "Bellandur": {
+    "total_orders": 15,
+    "cancelled_orders": 12,
+    "cancellation_rate": 0.80,
+    "status": "advisory_active"
+  }
+}

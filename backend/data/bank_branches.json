@@ -1,0 +1,14 @@
+{
+  "HSR Layout": {
+    "total_branches": 10,
+    "closed_branches": 7,
+    "closure_rate": 0.70,
+    "status": "critical_closures"
+  },
+  "Whitefield": {
+    "total_branches": 12,
+    "closed_branches": 0,
+    "closure_rate": 0.0,
+    "status": "operational"
+  }
+}

@@ -6,9 +6,3 @@ apscheduler
 python-dotenv
 sqlalchemy
 reportlab
-# legacy ML stack preserved from v1 backend
-xgboost
-shap
-joblib
-pandas
-numpy
