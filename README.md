@@ -40,3 +40,16 @@ uvicorn main:app --reload --port 8000
 python3 -m unittest app.tests.test_phase2_contracts -v
 python3 -m unittest app.tests.test_api_endpoints -v
 ```
+
+## Deploy on Render
+
+This repo includes `render.yaml` and `Procfile` for Render deployment.
+
+1. Create a **Blueprint** service in Render and point it to this repository.
+2. Set service root to `protoryde-backend` if deploying from the umbrella repo.
+3. Render provisions `protoryde-db` from `render.yaml` and injects `DATABASE_URL`.
+4. Keep `ENABLE_SCHEDULER=false` in production unless you intentionally want live polling.
+
+### Notes
+- The app normalizes `postgres://` to `postgresql://` automatically for SQLAlchemy compatibility.
+- `model.pkl` is optional; premium prediction falls back to the rule engine when the model is absent.

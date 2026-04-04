@@ -7,8 +7,15 @@ from sqlalchemy.orm import sessionmaker
 
 load_dotenv()
 
+
+def _normalize_database_url(url: str) -> str:
+    if url.startswith("postgres://"):
+        return url.replace("postgres://", "postgresql://", 1)
+    return url
+
+
 # Use DATABASE_URL when provided. Fall back to local SQLite to keep demo setup reliable.
-SQLALCHEMY_DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./protoryde.db")
+SQLALCHEMY_DATABASE_URL = _normalize_database_url(os.getenv("DATABASE_URL", "sqlite:///./protoryde.db"))
 CONNECT_ARGS = {"check_same_thread": False} if SQLALCHEMY_DATABASE_URL.startswith("sqlite") else {}
 
 engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args=CONNECT_ARGS)

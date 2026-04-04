@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: protoryde-backend
+    env: python
+    region: singapore
+    plan: free
+    rootDir: .
+    startCommand: "uvicorn main:app --host 0.0.0.0 --port $PORT"
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.11"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: protoryde-db
+          property: connectionString
+      - key: ENABLE_SCHEDULER
+        value: "false"
+    healthCheckPath: /health
+
+databases:
+  - name: protoryde-db
+    databaseName: protoryde
+    plan: free
