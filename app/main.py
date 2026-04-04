@@ -8,10 +8,14 @@ from app.core.scheduler import start_scheduler
 from app.core.database import init_db
 
 logging.basicConfig(level=logging.INFO)
+import threading
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    init_db()
+    # Run init_db in a background thread so uvicorn binds to the port
+    # immediately. Render kills deploys that don't open a port quickly.
+    db_thread = threading.Thread(target=init_db, daemon=True)
+    db_thread.start()
     scheduler = None
     if os.getenv("ENABLE_SCHEDULER", "false").lower() == "true":
         scheduler = start_scheduler()
