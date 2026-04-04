@@ -1,11 +1,14 @@
+import logging
 import os
+import time
 
 from dotenv import load_dotenv
 from sqlalchemy import create_engine
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import declarative_base, sessionmaker
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 
 def _normalize_database_url(url: str) -> str:
@@ -22,12 +25,26 @@ engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args=CONNECT_ARGS)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
+_MAX_RETRIES = 5
+_INITIAL_BACKOFF_S = 2
+
 
 def init_db():
-    # Import model metadata right before create_all to avoid circular imports.
+    """Create tables, retrying on transient DB connection failures (e.g. Render Postgres not ready yet)."""
     from app.core import models  # noqa: F401
 
-    Base.metadata.create_all(bind=engine)
+    for attempt in range(1, _MAX_RETRIES + 1):
+        try:
+            Base.metadata.create_all(bind=engine)
+            logger.info("Database tables created successfully.")
+            return
+        except Exception as exc:
+            if attempt == _MAX_RETRIES:
+                logger.error("Database connection failed after %d attempts: %s", _MAX_RETRIES, exc)
+                raise
+            wait = _INITIAL_BACKOFF_S * (2 ** (attempt - 1))
+            logger.warning("DB connection attempt %d/%d failed (%s). Retrying in %ds...", attempt, _MAX_RETRIES, exc, wait)
+            time.sleep(wait)
 
 
 def get_db():
