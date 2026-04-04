@@ -72,6 +72,9 @@ class WeatherService:
         )
         weather_res.raise_for_status()
         current = weather_res.json().get("current", {})
+        # NOTE: Open-Meteo "current.precipitation" is the instantaneous rate (mm),
+        # not a 24h cumulative total. For demo purposes this is acceptable; for
+        # production, switch to the "daily" endpoint with "precipitation_sum".
         conditions["rain_24h_mm"] = float(current.get("precipitation", 0.0))
         conditions["temp_c"] = float(current.get("temperature_2m", 0.0))
         conditions["humidity_pct"] = float(current.get("relative_humidity_2m", 0.0))

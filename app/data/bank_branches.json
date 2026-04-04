@@ -10,5 +10,41 @@
     "closed_branches": 0,
     "closure_rate": 0.0,
     "status": "operational"
+  },
+  "Bellandur": {
+    "total_branches": 8,
+    "closed_branches": 6,
+    "closure_rate": 0.75,
+    "status": "critical_closures"
+  },
+  "Koramangala": {
+    "total_branches": 9,
+    "closed_branches": 2,
+    "closure_rate": 0.22,
+    "status": "operational"
+  },
+  "Indiranagar": {
+    "total_branches": 11,
+    "closed_branches": 1,
+    "closure_rate": 0.09,
+    "status": "operational"
+  },
+  "Marathahalli": {
+    "total_branches": 7,
+    "closed_branches": 5,
+    "closure_rate": 0.71,
+    "status": "critical_closures"
+  },
+  "BTM Layout": {
+    "total_branches": 6,
+    "closed_branches": 1,
+    "closure_rate": 0.17,
+    "status": "operational"
+  },
+  "Electronic City": {
+    "total_branches": 10,
+    "closed_branches": 3,
+    "closure_rate": 0.30,
+    "status": "partial_closures"
   }
 }

@@ -111,8 +111,8 @@ def _ensure_rider_and_policy(db: Session, rider_id: str, zone: str, exclusions_a
         db.flush()
 
     now = _now()
-    week_start = now - timedelta(days=now.weekday())
-    week_end = week_start + timedelta(days=6)
+    week_start = now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=now.weekday())
+    week_end = week_start + timedelta(days=6, hours=23, minutes=59, seconds=59)
     policy = (
         db.query(Policy)
         .filter(Policy.rider_id == rider_id, Policy.week_start_date >= week_start, Policy.status == "active")
@@ -157,6 +157,7 @@ class TriggerSimulateRequest(BaseModel):
     latitude: Optional[float] = None
     longitude: Optional[float] = None
     avg_daily_earnings: float = 1050.0
+    duration_hours: float = 9.0
 
 
 class PolicyActivateRequest(BaseModel):
@@ -173,10 +174,12 @@ class PolicyActivateRequest(BaseModel):
 
 class DemoBootstrapRequest(BaseModel):
     rider_id: str = "rdr_demo_hsr"
-    rider_name: str = "Pranav"
+    rider_name: str = Field(default="Pranav", alias="name")
     zone: str = "HSR Layout"
     upi_id: str = "pranav@okicici"
     exclusions_accepted: bool = True
+
+    model_config = {"populate_by_name": True}
 
 
 @router.get("/exclusions")
@@ -433,6 +436,7 @@ def simulate_trigger(payload: TriggerSimulateRequest, db: Session = Depends(get_
         trigger_value=float(derived_value),
         rider_id=payload.rider_id,
         avg_daily_earnings=payload.avg_daily_earnings,
+        duration_hours=payload.duration_hours,
         is_simulated=payload.is_simulated,
         latitude=payload.latitude,
         longitude=payload.longitude,

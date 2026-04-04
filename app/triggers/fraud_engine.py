@@ -80,7 +80,7 @@ class FraudEngine:
         branches = _load_branches(zone)
 
         # L1: weather/environment threshold
-        l1_passed = trigger_value >= threshold if trigger_type in {"HEAVY_RAIN", "EXTREME_HEAT", "SEVERE_AQI"} else True
+        l1_passed = trigger_value >= threshold
         l1_reason = f"{trigger_value} vs {threshold} threshold"
 
         # L2: zone presence
@@ -90,7 +90,9 @@ class FraudEngine:
             l2_evidence = {"mode": "simulated"}
         elif latitude is not None and longitude is not None:
             zone_center = ZONES[zone]
-            dist_km = math.hypot(latitude - zone_center["lat"], longitude - zone_center["lon"]) * 111.0
+            lat_diff = latitude - zone_center["lat"]
+            lon_diff = (longitude - zone_center["lon"]) * math.cos(math.radians(zone_center["lat"]))
+            dist_km = math.hypot(lat_diff, lon_diff) * 111.0
             l2_passed = dist_km <= 5.0
             l2_reason = f"GPS distance from zone center: {dist_km:.2f}km"
             l2_evidence = {"distance_km": round(dist_km, 2), "max_km": 5.0}

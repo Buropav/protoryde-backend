@@ -5,7 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 PYTHON_BIN="${PYTHON_BIN:-python}"
 
-echo "[1/4] Checking required deploy files..."
+echo "[1/5] Checking required deploy files..."
 for f in render.yaml Procfile requirements.txt main.py; do
   [[ -f "$f" ]] || { echo "Missing required file: $f"; exit 1; }
 done

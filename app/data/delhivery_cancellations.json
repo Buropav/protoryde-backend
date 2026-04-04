@@ -16,5 +16,35 @@
     "cancelled_orders": 12,
     "cancellation_rate": 0.80,
     "status": "advisory_active"
+  },
+  "Koramangala": {
+    "total_orders": 20,
+    "cancelled_orders": 3,
+    "cancellation_rate": 0.15,
+    "status": "normal"
+  },
+  "Indiranagar": {
+    "total_orders": 22,
+    "cancelled_orders": 4,
+    "cancellation_rate": 0.18,
+    "status": "normal"
+  },
+  "Marathahalli": {
+    "total_orders": 16,
+    "cancelled_orders": 11,
+    "cancellation_rate": 0.69,
+    "status": "advisory_active"
+  },
+  "BTM Layout": {
+    "total_orders": 19,
+    "cancelled_orders": 5,
+    "cancellation_rate": 0.26,
+    "status": "normal"
+  },
+  "Electronic City": {
+    "total_orders": 21,
+    "cancelled_orders": 6,
+    "cancellation_rate": 0.29,
+    "status": "normal"
   }
 }

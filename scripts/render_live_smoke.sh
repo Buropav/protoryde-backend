@@ -20,7 +20,7 @@ cat /tmp/protoryde_model_status.json
 printf "\nBootstrapping demo rider...\n"
 curl -fsS -X POST "$BASE/api/demo/bootstrap" \
   -H "Content-Type: application/json" \
-  -d "{\"rider_id\":\"$RIDER_ID\",\"name\":\"Demo Rider\",\"phone\":\"9999999999\",\"zone\":\"HSR Layout\",\"upi_id\":\"demo@upi\",\"exclusions_acknowledged\":true}" \
+  -d "{\"rider_id\":\"$RIDER_ID\",\"rider_name\":\"Demo Rider\",\"phone\":\"9999999999\",\"zone\":\"HSR Layout\",\"upi_id\":\"demo@upi\",\"exclusions_accepted\":true}" \
   >/tmp/protoryde_bootstrap.json
 cat /tmp/protoryde_bootstrap.json
 

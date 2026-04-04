@@ -86,6 +86,8 @@ def predict_with_shap(
             }
         )
 
+    adjustment_total = round(sum(item["shap_value"] for item in breakdown), 2)
+
     return {
         "engine": "ml_shap",
         "zone": zone,
@@ -93,5 +95,6 @@ def predict_with_shap(
         "base_premium": round(predicted, 2),
         "final_premium": round(predicted, 2),
         "adjustments": breakdown,
+        "adjustment_total": adjustment_total,
         "model_status": ml_status(),
     }
