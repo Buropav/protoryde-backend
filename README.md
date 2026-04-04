@@ -50,6 +50,19 @@ This repo includes `render.yaml` and `Procfile` for Render deployment.
 3. Render provisions `protoryde-db` from `render.yaml` and injects `DATABASE_URL`.
 4. Keep `ENABLE_SCHEDULER=false` in production unless you intentionally want live polling.
 
+### Beginner flow (recommended)
+1. Run preflight locally:
+   ```bash
+   ./scripts/render_preflight.sh
+   ```
+2. Deploy from Render Blueprint.
+3. Run live smoke checks against Render URL:
+   ```bash
+   BACKEND_URL=https://<your-service>.onrender.com ./scripts/render_live_smoke.sh
+   ```
+
+See full guide: `docs/RENDER_FIRST_DEPLOY.md`
+
 ### Notes
 - The app normalizes `postgres://` to `postgresql://` automatically for SQLAlchemy compatibility.
 - `model.pkl` is optional; premium prediction falls back to the rule engine when the model is absent.
