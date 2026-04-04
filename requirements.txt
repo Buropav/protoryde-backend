@@ -8,3 +8,8 @@ sqlalchemy==2.0.49
 psycopg2-binary==2.9.11
 reportlab==4.4.10
 httpx==0.28.1
+numpy==2.3.3
+pandas==2.3.2
+joblib==1.5.2
+xgboost==3.0.5
+shap==0.49.1
