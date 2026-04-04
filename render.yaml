@@ -2,7 +2,7 @@ services:
   - type: web
     name: protoryde-backend
     env: python
-    region: singapore
+    region: oregon
     plan: free
     rootDir: .
     buildCommand: "pip install -r requirements.txt"
