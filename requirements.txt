@@ -5,6 +5,7 @@ requests
 apscheduler
 python-dotenv
 sqlalchemy
+psycopg2-binary
 reportlab
 # legacy ML stack preserved from v1 backend
 xgboost
