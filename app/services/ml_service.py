@@ -1,7 +1,10 @@
+import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-MODEL_PATH = Path("model.pkl")
+logger = logging.getLogger(__name__)
+
+MODEL_PATH = Path(__file__).resolve().parent.parent.parent / "model.pkl"
 FEATURE_NAMES = ["zone_risk_score", "weather_severity", "claim_history"]
 FEATURE_LABELS = {
     "zone_risk_score": "Zone Flood / Risk Score",
@@ -22,28 +25,40 @@ ZONE_RISK = {
 _MODEL = None
 _EXPLAINER = None
 _ML_ERROR = None
+_ML_LOADED = False
 
-try:
-    import joblib
-    import pandas as pd
-    import shap
 
-    if MODEL_PATH.exists():
-        _MODEL = joblib.load(MODEL_PATH)
-        _EXPLAINER = shap.TreeExplainer(_MODEL)
-    else:
-        _ML_ERROR = "model.pkl not found"
-except Exception as exc:  # pragma: no cover - env dependent
-    _ML_ERROR = str(exc)
+def _lazy_load_model() -> None:
+    """Load the ML model and SHAP explainer on first use, not at import time."""
+    global _MODEL, _EXPLAINER, _ML_ERROR, _ML_LOADED
+    if _ML_LOADED:
+        return
+    _ML_LOADED = True
+    try:
+        import joblib
+        import shap
+
+        if MODEL_PATH.exists():
+            _MODEL = joblib.load(MODEL_PATH)
+            _EXPLAINER = shap.TreeExplainer(_MODEL)
+            logger.info("ML model loaded from %s", MODEL_PATH)
+        else:
+            _ML_ERROR = f"model.pkl not found at {MODEL_PATH}"
+            logger.warning(_ML_ERROR)
+    except Exception as exc:  # pragma: no cover - env dependent
+        _ML_ERROR = str(exc)
+        logger.warning("ML model load failed: %s", _ML_ERROR)
 
 
 def is_ml_ready() -> bool:
+    _lazy_load_model()
     return _MODEL is not None and _EXPLAINER is not None
 
 
 def ml_status() -> Dict[str, Any]:
+    _lazy_load_model()
     return {
-        "ready": is_ml_ready(),
+        "ready": _MODEL is not None and _EXPLAINER is not None,
         "model_path": str(MODEL_PATH),
         "error": _ML_ERROR,
     }
@@ -59,7 +74,8 @@ def predict_with_shap(
     claim_history: float = 1.0,
     explicit_zone_risk: Optional[float] = None,
 ) -> Dict[str, Any]:
-    if not is_ml_ready():
+    _lazy_load_model()
+    if not (_MODEL is not None and _EXPLAINER is not None):
         raise RuntimeError(_ML_ERROR or "ML model unavailable")
 
     import pandas as pd
@@ -98,3 +114,4 @@ def predict_with_shap(
         "adjustment_total": adjustment_total,
         "model_status": ml_status(),
     }
+

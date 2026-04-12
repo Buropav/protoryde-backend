@@ -16,9 +16,12 @@ services:
           property: connectionString
       - key: ENABLE_SCHEDULER
         value: "false"
+      - key: ALLOWED_ORIGINS
+        value: "*"
     healthCheckPath: /health
 
 databases:
   - name: protoryde-db
     databaseName: protoryde
+    region: oregon
     plan: free

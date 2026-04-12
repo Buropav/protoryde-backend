@@ -1,4 +1,3 @@
-import json
 import os
 from io import BytesIO
 from datetime import datetime, timedelta, timezone
@@ -12,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.models import AuditLog, Claim, Policy, Rider
+from app.core.utils import read_json
 from app.services.ml_service import is_ml_ready, ml_status, predict_with_shap, zone_risk_score
 from app.services.policy_pdf import generate_policy_pdf
 from app.services.pricing_service import PricingService
@@ -41,8 +41,7 @@ def _now() -> datetime:
 
 
 def _read_json(name: str) -> Dict[str, Any]:
-    with open(os.path.join(DATA_DIR, name), "r", encoding="utf-8") as fh:
-        return json.load(fh)
+    return read_json(os.path.join(DATA_DIR, name))
 
 
 def _predict_premium(
@@ -440,6 +439,7 @@ def simulate_trigger(payload: TriggerSimulateRequest, db: Session = Depends(get_
         is_simulated=payload.is_simulated,
         latitude=payload.latitude,
         longitude=payload.longitude,
+        db=db,
     )
 
     claim = Claim(

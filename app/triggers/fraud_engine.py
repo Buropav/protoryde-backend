@@ -1,14 +1,17 @@
 import json
+import logging
 import math
 import os
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 from uuid import uuid4
 
+from app.core.utils import read_json
 from app.triggers.weather_service import FIXTURE_VERSION, ZONES
 
+logger = logging.getLogger(__name__)
+
 DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
-AUDIT_LOG_FILE = os.path.join(DATA_DIR, "simulation_audit.log")
 
 TRIGGER_THRESHOLDS = {
     "HEAVY_RAIN": 30.0,
@@ -23,13 +26,8 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _read_json(path: str) -> Dict[str, Any]:
-    with open(path, "r", encoding="utf-8") as fh:
-        return json.load(fh)
-
-
 def _load_delhivery(zone: str) -> Dict[str, Any]:
-    data = _read_json(os.path.join(DATA_DIR, "delhivery_cancellations.json"))
+    data = read_json(os.path.join(DATA_DIR, "delhivery_cancellations.json"))
     entry = data.get(zone, {"total_orders": 20, "cancelled_orders": 1, "cancellation_rate": 0.05})
     return {
         "total_banking_orders": int(entry.get("total_orders", 0)),
@@ -40,7 +38,7 @@ def _load_delhivery(zone: str) -> Dict[str, Any]:
 
 
 def _load_branches(zone: str) -> Dict[str, Any]:
-    data = _read_json(os.path.join(DATA_DIR, "bank_branches.json"))
+    data = read_json(os.path.join(DATA_DIR, "bank_branches.json"))
     entry = data.get(zone, {"total_branches": 10, "closed_branches": 0, "closure_rate": 0.0})
     return {
         "total_branches": int(entry.get("total_branches", 0)),
@@ -50,10 +48,29 @@ def _load_branches(zone: str) -> Dict[str, Any]:
     }
 
 
-def _audit(event: Dict[str, Any]) -> None:
-    os.makedirs(os.path.dirname(AUDIT_LOG_FILE), exist_ok=True)
-    with open(AUDIT_LOG_FILE, "a", encoding="utf-8") as fh:
-        fh.write(json.dumps({"timestamp": _now_iso(), **event}) + "\n")
+def _audit(event: Dict[str, Any], db=None) -> None:
+    """Write audit event to the database. Falls back to file if no session provided."""
+    if db is not None:
+        try:
+            from app.core.models import AuditLog
+            db.add(AuditLog(
+                entity_type=event.get("entity_type", "FraudTrace"),
+                entity_id=event.get("entity_id", ""),
+                action="FRAUD_TRACE",
+                metadata_json=event,
+            ))
+            # Don't commit here — let the caller's transaction handle it.
+            return
+        except Exception as exc:
+            logger.warning("DB audit write failed, falling back to file: %s", exc)
+    # Fallback: append to file (will be lost on Render ephemeral disk).
+    audit_log_file = os.path.join(DATA_DIR, "simulation_audit.log")
+    try:
+        os.makedirs(os.path.dirname(audit_log_file), exist_ok=True)
+        with open(audit_log_file, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps({"timestamp": _now_iso(), **event}) + "\n")
+    except OSError:
+        logger.warning("File audit write failed for event %s", event.get("entity_id"))
 
 
 class FraudEngine:
@@ -68,6 +85,7 @@ class FraudEngine:
         is_simulated: bool = False,
         latitude: Optional[float] = None,
         longitude: Optional[float] = None,
+        db=None,
     ) -> Dict[str, Any]:
         trigger_type = trigger_type.upper()
         if trigger_type not in TRIGGER_THRESHOLDS:
@@ -139,5 +157,6 @@ class FraudEngine:
             "fixture_version": FIXTURE_VERSION if is_simulated else None,
         }
 
-        _audit({"event": "fraud_trace", "entity_type": "claim", "entity_id": result["claim_id"], "details": result})
+        _audit({"event": "fraud_trace", "entity_type": "claim", "entity_id": result["claim_id"], "details": result}, db=db)
         return result
+
