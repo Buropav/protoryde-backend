@@ -13,7 +13,7 @@ from app.core.database import get_db
 from app.core.models import AuditLog, Claim, Policy, Rider
 from app.core.utils import read_json
 from app.services.ml_service import is_ml_ready, ml_status, predict_with_shap, zone_risk_score
-from app.services.policy_pdf import generate_policy_pdf
+from app.services.policy_pdf import generate_policy_pdf, generate_ledger_pdf
 from app.services.pricing_service import PricingService
 from app.triggers.fraud_engine import FraudEngine, TRIGGER_THRESHOLDS
 from app.triggers.weather_service import FIXTURE_VERSION, WeatherService, ZONES
@@ -659,6 +659,92 @@ def download_current_policy_document(rider_id: str, db: Session = Depends(get_db
             entity_id=policy.id,
             action="POLICY_DOCUMENT_DOWNLOADED",
             metadata_json={"rider_id": rider_id, "filename": filename},
+        )
+    )
+    db.commit()
+
+    return StreamingResponse(
+        BytesIO(pdf_bytes),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/policies/{rider_id}/ledger/document")
+def download_annual_ledger_document(rider_id: str, db: Session = Depends(get_db)):
+    rider = db.query(Rider).filter(Rider.id == rider_id).first()
+    if rider is None:
+        raise HTTPException(status_code=404, detail={"error": "RIDER_NOT_FOUND", "message": "Rider not found"})
+
+    now = _now()
+    one_year_ago = now - timedelta(days=365)
+
+    policies = (
+        db.query(Policy)
+        .filter(Policy.rider_id == rider_id, Policy.created_at >= one_year_ago)
+        .order_by(Policy.created_at.desc())
+        .all()
+    )
+
+    claims = (
+        db.query(Claim)
+        .filter(Claim.rider_id == rider_id, Claim.created_at >= one_year_ago)
+        .order_by(Claim.created_at.desc())
+        .all()
+    )
+
+    total_base_premium = sum(p.base_premium or 0.0 for p in policies)
+    total_claims_paid = sum(c.payout_amount or 0.0 for c in claims if c.payout_status == "credited")
+    net_balance = total_claims_paid - total_base_premium
+    claims_count = len(claims)
+
+    summary_metrics = {
+        "total_base_premium": total_base_premium,
+        "total_claims_paid": total_claims_paid,
+        "net_balance": net_balance,
+        "claims_count": claims_count,
+    }
+
+    policy_dicts = [
+        {
+            "id": p.id,
+            "week_start_date": p.week_start_date,
+            "status": p.status,
+            "base_premium": p.base_premium,
+        }
+        for p in policies
+    ]
+
+    claim_dicts = [
+        {
+            "id": c.id,
+            "trigger_type": c.trigger_type,
+            "payout_status": c.payout_status,
+            "payout_amount": c.payout_amount,
+        }
+        for c in claims
+    ]
+
+    pdf_bytes = generate_ledger_pdf(
+        rider_data={
+            "name": rider.name,
+            "phone": rider.phone,
+            "delhivery_partner_id": rider.delhivery_partner_id,
+            "zone": rider.zone,
+        },
+        policies=policy_dicts,
+        claims=claim_dicts,
+        summary_metrics=summary_metrics,
+    )
+
+    filename = f"protoryde_annual_ledger_{rider_id}.pdf"
+
+    db.add(
+        AuditLog(
+            entity_type="Rider",
+            entity_id=rider_id,
+            action="ANNUAL_LEDGER_DOWNLOADED",
+            metadata_json={"filename": filename, "policies_count": len(policies), "claims_count": claims_count},
         )
     )
     db.commit()
