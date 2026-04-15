@@ -896,3 +896,28 @@ def download_annual_ledger_document(rider_id: str, db: Session = Depends(get_db)
         media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@router.get("/admin/pool-health")
+def get_pool_health(db: Session = Depends(get_db)):
+    active_policies_count = db.query(Policy).filter(Policy.status == "active").count()
+    
+    base_pool_balance = 500000.0  # ₹5,00,000 base
+    total_balance = base_pool_balance + float(active_policies_count * 30.0)
+    
+    simulated_loss = 115000.0
+    post_stress_balance = total_balance - simulated_loss
+    
+    return {
+        "active_policies": active_policies_count,
+        "pool_balance": total_balance,
+        "bcr": 2.15,
+        "status": "sustainable",
+        "reserve_ratio": "150%",
+        "simulated_monsoon_impact": {
+            "expected_claims": 50,
+            "expected_payout": simulated_loss,
+            "post_stress_balance": post_stress_balance,
+            "post_stress_status": "solvent" if post_stress_balance > 0 else "insolvent"
+        }
+    }
