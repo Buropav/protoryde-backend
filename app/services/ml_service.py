@@ -114,12 +114,18 @@ def predict_with_shap(
 
     adjustment_total = round(sum(item["shap_value"] for item in breakdown), 2)
 
+    # SHAP base value = expected model output (average prediction).
+    # base_premium = SHAP expected value, final_premium = actual prediction with ₹40 floor.
+    base_value = round(float(_EXPLAINER.expected_value), 2)
+    final = max(40.0, round(predicted, 2))  # enforce ₹40 minimum (same as rule engine)
+
     return {
         "engine": "ml_shap",
         "zone": zone,
         "zone_risk_score": zr,
-        "base_premium": round(predicted, 2),
-        "final_premium": round(predicted, 2),
+        "season_risk": sr,
+        "base_premium": base_value,
+        "final_premium": final,
         "adjustments": breakdown,
         "adjustment_total": adjustment_total,
         "model_status": ml_status(),
