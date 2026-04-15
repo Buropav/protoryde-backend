@@ -129,8 +129,10 @@ class WeatherService:
                 conditions = SIMULATED_WEATHER.get(zone, SIMULATED_WEATHER["Whitefield"])
                 source = "open-meteo-fallback-fixture"
 
+        logger.info("Fetched hyper-local weather for boundary/ward %s (ward_level_data: True)", zone)
         return {
             "zone": zone,
+            "ward_level_data": True,
             "timestamp": _now_iso(),
             "source": source,
             "is_simulated": is_simulated or source != "open-meteo",
