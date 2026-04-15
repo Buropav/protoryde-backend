@@ -186,6 +186,7 @@ def get_exclusions():
     return {"version": EXCLUSIONS_VERSION, "items": EXCLUSIONS}
 
 
+@router.get("/admin/model-status")
 @router.get("/premium/model-status")
 def get_model_status():
     status = ml_status()
@@ -920,4 +921,37 @@ def get_pool_health(db: Session = Depends(get_db)):
             "post_stress_balance": post_stress_balance,
             "post_stress_status": "solvent" if post_stress_balance > 0 else "insolvent"
         }
+    }
+
+
+@router.get("/forecast/{zone}")
+def get_7_day_forecast(zone: str):
+    if zone not in ZONES:
+        raise HTTPException(status_code=422, detail={"error": "UNSUPPORTED_ZONE", "message": "Unsupported zone"})
+    
+    import random
+    from datetime import datetime, timedelta
+    
+    # Mocking Prophet 7-Day Forecast
+    base_date = datetime.now()
+    forecasts = []
+    
+    # Deterministic mock based on zone string
+    random.seed(zone)
+    
+    for i in range(7):
+        date_str = (base_date + timedelta(days=i)).strftime("%Y-%m-%d")
+        prob_payout = round(random.uniform(0.05, 0.40), 2)  # Between 5% and 40% probability
+        expected_loss = round(prob_payout * 2300.0, 2)
+        
+        forecasts.append({
+            "date": date_str,
+            "prob_payout": prob_payout,
+            "expected_loss": expected_loss
+        })
+        
+    return {
+        "zone": zone,
+        "forecast": forecasts,
+        "model": "prophet_v2_mock"
     }
