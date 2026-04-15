@@ -72,6 +72,19 @@ def _audit(event: Dict[str, Any], db=None) -> None:
     except OSError:
         logger.warning("File audit write failed for event %s", event.get("entity_id"))
 
+IFOREST_MODEL_PATH = os.path.join(DATA_DIR, "..", "ml", "isolation_forest.pkl")
+_iforest_model = None
+
+def _load_iforest_model():
+    global _iforest_model
+    if _iforest_model is None and os.path.exists(IFOREST_MODEL_PATH):
+        try:
+            import pickle
+            with open(IFOREST_MODEL_PATH, "rb") as f:
+                _iforest_model = pickle.load(f)
+        except Exception as e:
+            logger.error("Failed to load Isolation Forest model: %s", e)
+    return _iforest_model
 
 class FraudEngine:
     @staticmethod
@@ -100,6 +113,17 @@ class FraudEngine:
         # L1: weather/environment threshold
         l1_passed = trigger_value >= threshold
         l1_reason = f"{trigger_value} vs {threshold} threshold"
+        
+        model = _load_iforest_model()
+        if model is not None and l1_passed:
+            try:
+                import numpy as np
+                X = np.array([[float(avg_daily_earnings), float(duration_hours)]])
+                if model.predict(X)[0] == -1:
+                    l1_passed = False
+                    l1_reason = f"ML Anomaly (Earnings: ₹{avg_daily_earnings}, Hours: {duration_hours})"
+            except Exception as e:
+                logger.warning("Isolation Forest prediction failed %s", e)
 
         # L2: zone presence
         if is_simulated and latitude is None and longitude is None:
