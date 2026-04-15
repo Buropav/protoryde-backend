@@ -296,6 +296,30 @@ def get_banking_metrics(zone: str):
     }
 
 
+@router.get("/policy/eligibility")
+def get_policy_eligibility(zone: str):
+    if zone not in ZONES:
+        raise HTTPException(status_code=422, detail={"error": "UNSUPPORTED_ZONE", "message": "Unsupported zone"})
+    
+    weather = WeatherService.get_current_conditions(zone, is_simulated=True)
+    
+    lockout_active = False
+    reason = None
+    
+    if weather["conditions"]["aqi"] > 500:
+        lockout_active = True
+        reason = "Severe AQI weather advisory active. Enrollment paused for 48 hours to prevent adverse selection."
+    elif weather["conditions"]["rain_24h_mm"] > 20:
+        lockout_active = True
+        reason = "Severe rainfall active. Enrollment paused for 48 hours to prevent adverse selection."
+
+    return {
+        "zone": zone,
+        "lockout_active": lockout_active,
+        "reason": reason,
+        "expires_at": (datetime.now() + timedelta(hours=48)).isoformat() if lockout_active else None
+    }
+
 @router.post("/policies/activate")
 def activate_policy(payload: PolicyActivateRequest, db: Session = Depends(get_db)):
     if payload.zone not in ZONES:
@@ -418,6 +442,7 @@ def bootstrap_demo(payload: DemoBootstrapRequest, db: Session = Depends(get_db))
             if policy.exclusions_acknowledged_at
             else None,
         },
+        "lockout_status": get_policy_eligibility(payload.zone),
     }
 
 
