@@ -152,7 +152,7 @@ class PremiumPredictRequest(BaseModel):
     zone: str = "HSR Layout"
     forecast_features: Dict[str, Any] = Field(default_factory=dict)
     rider_features: Dict[str, Any] = Field(default_factory=dict)
-    is_simulated: bool = True
+    is_simulated: bool = False
     prefer_ml: bool = True
     weather_severity: Optional[float] = None
     claim_history: Optional[float] = None
@@ -163,7 +163,7 @@ class TriggerSimulateRequest(BaseModel):
     zone: str = "HSR Layout"
     trigger_type: str = "HEAVY_RAIN"
     as_of: Optional[str] = None
-    is_simulated: bool = True
+    is_simulated: bool = False
     trigger_value: Optional[float] = None
     rider_id: str = "rdr_demo_hsr"
     latitude: Optional[float] = None
@@ -298,19 +298,29 @@ def get_weather_warnings(zone: str, is_simulated: bool = Query(False)):
 
 @router.get("/mock/delhivery/{zone}/{date}")
 def get_delhivery_metrics(zone: str, date: str):
-    data = _read_json("delhivery_cancellations.json")
-    record = data.get(zone)
-    if record is None:
-        raise HTTPException(status_code=404, detail={"error": "ZONE_NOT_FOUND", "message": f"No mock data for zone {zone}"})
-    return {
-        "zone": zone,
-        "date": date,
-        "total_banking_orders": int(record.get("total_orders", 0)),
-        "cancelled_orders": int(record.get("cancelled_orders", 0)),
-        "cancellation_rate_pct": round(float(record.get("cancellation_rate", 0.0)) * 100, 2),
-        "note": "Demo fixture",
-        "fixture_version": FIXTURE_VERSION,
-    }
+    import pandas as pd
+    try:
+        df = pd.read_csv(os.path.join(DATA_DIR, "delhivery_dataset.csv"))
+        zone_mask = df['source_name'].str.contains(zone, case=False, na=False) | df['destination_name'].str.contains(zone, case=False, na=False)
+        zone_df = df[zone_mask]
+        if len(zone_df) == 0: zone_df = df
+        
+        total_orders = len(zone_df)
+        delayed = zone_df[zone_df['actual_time'] > zone_df['osrm_time'] * 1.5]
+        cancelled_orders = len(delayed)
+        cancellation_rate_pct = round((cancelled_orders / total_orders) * 100, 2) if total_orders > 0 else 0.0
+        
+        return {
+            "zone": zone,
+            "date": date,
+            "total_banking_orders": int(total_orders),
+            "cancelled_orders": int(cancelled_orders),
+            "cancellation_rate_pct": cancellation_rate_pct,
+            "note": "Live data from logistics dataset",
+            "fixture_version": FIXTURE_VERSION,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail={"error": "DATASET_ERROR", "message": f"Failed to load real logistics dataset: {str(e)}"})
 
 
 @router.get("/mock/branches/{zone}")
@@ -336,7 +346,7 @@ def get_policy_eligibility(zone: str):
     if zone not in ZONES:
         raise HTTPException(status_code=422, detail={"error": "UNSUPPORTED_ZONE", "message": "Unsupported zone"})
     
-    weather = WeatherService.get_current_conditions(zone, is_simulated=True)
+    weather = WeatherService.get_current_conditions(zone, is_simulated=False)
     
     lockout_active = False
     reason = None

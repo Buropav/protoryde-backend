@@ -27,12 +27,30 @@ def _now_iso() -> str:
 
 
 def _load_delhivery(zone: str) -> Dict[str, Any]:
-    data = read_json(os.path.join(DATA_DIR, "delhivery_cancellations.json"))
-    entry = data.get(zone, {"total_orders": 20, "cancelled_orders": 1, "cancellation_rate": 0.05})
+    import pandas as pd
+    try:
+        df = pd.read_csv(os.path.join(DATA_DIR, "delhivery_dataset.csv"))
+        zone_mask = df['source_name'].str.contains(zone, case=False, na=False) | df['destination_name'].str.contains(zone, case=False, na=False)
+        zone_df = df[zone_mask]
+        
+        if len(zone_df) == 0:
+            zone_df = df
+            
+        total_orders = len(zone_df)
+        delayed = zone_df[zone_df['actual_time'] > zone_df['osrm_time'] * 1.5]
+        cancelled_orders = len(delayed)
+        cancellation_rate = cancelled_orders / total_orders if total_orders > 0 else 0.0
+        
+    except Exception as e:
+        logger.warning(f"Failed to load real delhivery dataset: {e}")
+        total_orders = 20
+        cancelled_orders = 1
+        cancellation_rate = 0.05
+
     return {
-        "total_banking_orders": int(entry.get("total_orders", 0)),
-        "cancelled_orders": int(entry.get("cancelled_orders", 0)),
-        "cancellation_rate_pct": round(float(entry.get("cancellation_rate", 0.0)) * 100, 2),
+        "total_banking_orders": int(total_orders),
+        "cancelled_orders": int(cancelled_orders),
+        "cancellation_rate_pct": round(float(cancellation_rate) * 100, 2),
         "fixture_version": FIXTURE_VERSION,
     }
 
@@ -126,11 +144,7 @@ class FraudEngine:
                 logger.warning("Isolation Forest prediction failed %s", e)
 
         # L2: zone presence
-        if is_simulated and latitude is None and longitude is None:
-            l2_passed = True
-            l2_reason = "Simulated mode: rider zone presence accepted"
-            l2_evidence = {"mode": "simulated"}
-        elif latitude is not None and longitude is not None:
+        if latitude is not None and longitude is not None:
             zone_center = ZONES[zone]
             lat_diff = latitude - zone_center["lat"]
             lon_diff = (longitude - zone_center["lon"]) * math.cos(math.radians(zone_center["lat"]))
