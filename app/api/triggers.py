@@ -206,11 +206,38 @@ def predict_premium(payload: PremiumPredictRequest):
         weather_severity=payload.weather_severity,
         claim_history=payload.claim_history,
     )
+    
+    now = datetime.now()
+    month = now.month
+    if 6 <= month <= 9:
+        season = "MONSOON"
+        season_multiplier = 1.6
+        rationale = "Monsoon season + high-risk zone = elevated premium"
+        if now.month <= 12:
+            next_review_date = datetime(year=now.year, month=10, day=1).isoformat()
+    elif 11 <= month or month == 1:
+        season = "WINTER"
+        season_multiplier = 1.2
+        rationale = "Winter season + elevated fog risk"
+        next_review_date = datetime(year=now.year + (1 if month >= 11 else 0), month=2, day=1).isoformat()
+    else:
+        season = "SUMMER"
+        season_multiplier = 1.0
+        rationale = "Summer season standard pricing"
+        next_review_date = datetime(year=now.year, month=6, day=1).isoformat()
+
+    zone_multiplier = 1.4 if "HSR" in payload.zone else 1.1
+
     return {
         "zone": payload.zone,
         "engine": premium["engine"],
         "base_premium": premium["base_premium"],
+        "season_multiplier": season_multiplier,
+        "zone_multiplier": zone_multiplier,
         "final_premium": premium["final_premium"],
+        "season": season,
+        "pricing_rationale": rationale,
+        "next_review_date": next_review_date,
         "adjustments": premium["adjustments"],
         "currency": "INR",
         "model_status": premium["model_status"],
