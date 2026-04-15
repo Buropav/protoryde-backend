@@ -20,7 +20,7 @@ model = IsolationForest(n_estimators=100, contamination=0.05, random_state=42)
 model.fit(X_train)
 
 # Save model
-model_path = '/home/anuruprkris/Project/devTrails/protoryde-backend/app/ml/isolation_forest.pkl'
+model_path = '/home/anuruprkris/Project/devTrails/protoryde-backend/app/models/isolation_forest.pkl'
 with open(model_path, 'wb') as f:
     pickle.dump(model, f)
 

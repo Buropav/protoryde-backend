@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
-MODEL_PATH = Path(__file__).resolve().parent.parent.parent / "model.pkl"
+MODEL_PATH = Path(__file__).resolve().parent.parent / "models" / "model.pkl"
 FEATURE_NAMES = ["zone_risk_score", "weather_severity", "claim_history"]
 FEATURE_LABELS = {
     "zone_risk_score": "Zone Flood / Risk Score",

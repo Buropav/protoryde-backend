@@ -26,7 +26,7 @@ def generate_synthetic_data(n_samples: int = 500, seed: int = 42) -> pd.DataFram
     )
 
 
-def train_and_save_model(model_path: str = "model.pkl") -> str:
+def train_and_save_model(model_path: str = "app/models/model.pkl") -> str:
     df = generate_synthetic_data()
     X = df[["zone_risk_score", "weather_severity", "claim_history"]]
     y = df["premium_amount"]

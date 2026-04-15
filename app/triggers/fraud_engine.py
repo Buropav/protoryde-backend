@@ -72,7 +72,7 @@ def _audit(event: Dict[str, Any], db=None) -> None:
     except OSError:
         logger.warning("File audit write failed for event %s", event.get("entity_id"))
 
-IFOREST_MODEL_PATH = os.path.join(DATA_DIR, "..", "ml", "isolation_forest.pkl")
+IFOREST_MODEL_PATH = os.path.join(DATA_DIR, "..", "models", "isolation_forest.pkl")
 _iforest_model = None
 
 def _load_iforest_model():
