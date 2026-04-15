@@ -44,6 +44,19 @@ def _read_json(name: str) -> Dict[str, Any]:
     return read_json(os.path.join(DATA_DIR, name))
 
 
+def _check_enrollment_lockout(zone: str) -> List[str]:
+    """Return active weather warnings for a zone. Non-empty list = lockout active.
+
+    Addresses adverse selection: riders cannot buy coverage when a weather
+    event is already in progress (Checklist #8).
+    """
+    try:
+        return WeatherService.get_forecast_warnings(zone, is_simulated=False)
+    except Exception:
+        # If weather API fails, allow enrollment rather than blocking riders
+        return []
+
+
 def _predict_premium(
     zone: str,
     forecast_features: Optional[Dict[str, Any]] = None,
@@ -321,6 +334,19 @@ def get_policy_eligibility(zone: str):
         "expires_at": (datetime.now() + timedelta(hours=48)).isoformat() if lockout_active else None
     }
 
+
+@router.get("/enrollment/lockout-status/{zone}")
+def get_enrollment_lockout_status(zone: str):
+    """Check whether enrollment is currently blocked for a zone due to active weather alerts."""
+    if zone not in ZONES:
+        raise HTTPException(status_code=422, detail={"error": "UNSUPPORTED_ZONE", "message": "Unsupported zone"})
+    warnings = _check_enrollment_lockout(zone)
+    return {
+        "zone": zone,
+        "lockout_active": len(warnings) > 0,
+        "active_warnings": warnings,
+        "message": "Enrollment blocked — active weather advisory" if warnings else "Enrollment open",
+    }
 @router.post("/policies/activate")
 def activate_policy(payload: PolicyActivateRequest, db: Session = Depends(get_db)):
     if payload.zone not in ZONES:
@@ -329,6 +355,17 @@ def activate_policy(payload: PolicyActivateRequest, db: Session = Depends(get_db
         raise HTTPException(
             status_code=422,
             detail={"error": "EXCLUSIONS_NOT_ACKNOWLEDGED", "message": "Policy activation requires exclusions acceptance"},
+        )
+    # --- Adverse selection guard (Checklist #8) ---
+    active_warnings = _check_enrollment_lockout(payload.zone)
+    if active_warnings:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": "ENROLLMENT_LOCKOUT",
+                "message": "Cannot activate policy during an active weather advisory. Try again when conditions normalize.",
+                "active_warnings": active_warnings,
+            },
         )
 
     policy = _ensure_rider_and_policy(db, rider_id=payload.rider_id, zone=payload.zone, exclusions_acknowledged=True)
