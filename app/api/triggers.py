@@ -194,6 +194,27 @@ class DemoBootstrapRequest(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+class PaymentCollectRequest(BaseModel):
+    rider_id: str
+    policy_id: str
+    amount: float
+    upi_id: str
+
+
+class PayoutInitiateRequest(BaseModel):
+    claim_id: str
+    rider_id: str
+    amount: float
+    upi_id: str
+
+
+class NotificationSendRequest(BaseModel):
+    rider_id: str
+    phone: str
+    message: str
+    type: str = "sms"
+
+
 @router.get("/exclusions")
 def get_exclusions():
     return {"version": EXCLUSIONS_VERSION, "items": EXCLUSIONS}
@@ -698,6 +719,72 @@ def get_claims_admin(
             }
             for row in rows
         ],
+    }
+
+
+@router.post("/payments/collect")
+def collect_premium(payload: PaymentCollectRequest, db: Session = Depends(get_db)):
+    """Mock UPI collection endpoint. Simulates frictionless micro-deduction."""
+    tx_id = f"txn_col_{uuid4().hex[:10]}"
+    db.add(
+        AuditLog(
+            entity_type="Payment",
+            entity_id=tx_id,
+            action="PREMIUM_COLLECTED",
+            metadata_json={"rider_id": payload.rider_id, "policy_id": payload.policy_id, "amount": payload.amount, "upi_id": payload.upi_id},
+        )
+    )
+    db.commit()
+    return {
+        "transaction_id": tx_id,
+        "status": "success",
+        "collected_at": _now().isoformat(),
+        "amount": payload.amount,
+        "message": f"Successfully deducted INR {payload.amount} from {payload.upi_id}",
+    }
+
+
+@router.post("/payouts/initiate")
+def initiate_payout(payload: PayoutInitiateRequest, db: Session = Depends(get_db)):
+    """Mock payout initiation. Demonstrates STP (straight-through processing)."""
+    tx_id = f"txn_pay_{uuid4().hex[:10]}"
+    db.add(
+        AuditLog(
+            entity_type="Payout",
+            entity_id=tx_id,
+            action="PAYOUT_INITIATED",
+            metadata_json={"claim_id": payload.claim_id, "rider_id": payload.rider_id, "amount": payload.amount, "upi_id": payload.upi_id},
+        )
+    )
+    db.commit()
+    return {
+        "transaction_id": tx_id,
+        "status": "success",
+        "processed_at": _now().isoformat(),
+        "amount": payload.amount,
+        "message": f"Successfully initiated INR {payload.amount} transfer to {payload.upi_id}",
+        "stp_latency_ms": 142, # Mock latency for storytelling
+    }
+
+
+@router.post("/notifications/send")
+def send_notification(payload: NotificationSendRequest, db: Session = Depends(get_db)):
+    """Mock SMS notification. Represents the 'relief' moment in the story."""
+    msg_id = f"msg_{uuid4().hex[:10]}"
+    db.add(
+        AuditLog(
+            entity_type="Notification",
+            entity_id=msg_id,
+            action="NOTIFICATION_SENT",
+            metadata_json={"rider_id": payload.rider_id, "phone": payload.phone, "type": payload.type},
+        )
+    )
+    db.commit()
+    return {
+        "message_id": msg_id,
+        "status": "delivered",
+        "delivered_at": _now().isoformat(),
+        "preview": payload.message,
     }
 
 
