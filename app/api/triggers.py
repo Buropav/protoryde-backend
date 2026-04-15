@@ -972,30 +972,54 @@ def get_pool_health(db: Session = Depends(get_db)):
 def get_7_day_forecast(zone: str):
     if zone not in ZONES:
         raise HTTPException(status_code=422, detail={"error": "UNSUPPORTED_ZONE", "message": "Unsupported zone"})
-    
-    import random
-    from datetime import datetime, timedelta
-    
-    # Mocking Prophet 7-Day Forecast
-    base_date = datetime.now()
-    forecasts = []
-    
-    # Deterministic mock based on zone string
-    random.seed(zone)
-    
-    for i in range(7):
-        date_str = (base_date + timedelta(days=i)).strftime("%Y-%m-%d")
-        prob_payout = round(random.uniform(0.05, 0.40), 2)  # Between 5% and 40% probability
-        expected_loss = round(prob_payout * 2300.0, 2)
         
-        forecasts.append({
-            "date": date_str,
-            "prob_payout": prob_payout,
-            "expected_loss": expected_loss
-        })
+    import httpx
+    coords = ZONES[zone]
+    lat, lon = coords["lat"], coords["lon"]
+    
+    try:
+        res = httpx.get(
+            "https://api.open-meteo.com/v1/forecast",
+            params={
+                "latitude": lat,
+                "longitude": lon,
+                "daily": "precipitation_sum,temperature_2m_max",
+                "timezone": "auto",
+            },
+            timeout=5.0
+        )
+        res.raise_for_status()
+        data = res.json().get("daily", {})
         
-    return {
-        "zone": zone,
-        "forecast": forecasts,
-        "model": "prophet_v2_mock"
-    }
+        forecasts = []
+        for i in range(len(data.get("time", []))):
+            date_str = data["time"][i]
+            rain = float(data["precipitation_sum"][i] or 0.0)
+            temp = float(data["temperature_2m_max"][i] or 0.0)
+            
+            if rain >= 30.0:
+                prob_payout = 0.95
+            elif rain >= 15.0:
+                prob_payout = 0.60
+            elif temp >= 40.0:
+                prob_payout = 0.80
+            else:
+                prob_payout = 0.05 + (rain / 100.0)
+                
+            prob_payout = min(round(prob_payout, 2), 1.0)
+            expected_loss = round(prob_payout * 2300.0, 2)
+            
+            forecasts.append({
+                "date": date_str,
+                "prob_payout": prob_payout,
+                "expected_loss": expected_loss,
+                "metrics": {"rain_mm": rain, "max_temp_c": temp}
+            })
+            
+        return {
+            "zone": zone,
+            "forecast": forecasts[:7],
+            "model": "open_meteo_live"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail={"error": "WEATHER_API_ERROR", "message": str(e)})
