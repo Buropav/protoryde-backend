@@ -24,11 +24,29 @@ ZONES = {
     "Electronic City": {"lat": 12.8452, "lon": 77.6602},
 }
 
-# Deterministic data used by simulation/demo flow.
-SIMULATED_WEATHER = {
-    "HSR Layout": {"rain_24h_mm": 44.0, "temp_c": 31.5, "aqi": 162, "humidity_pct": 78.0, "wind_kph": 13.2},
-    "Whitefield": {"rain_24h_mm": 12.0, "temp_c": 30.0, "aqi": 118, "humidity_pct": 66.0, "wind_kph": 9.8},
-    "Bellandur": {"rain_24h_mm": 48.0, "temp_c": 30.8, "aqi": 188, "humidity_pct": 80.0, "wind_kph": 14.5},
+# Open fallback data used only when live fetch fails.
+FALLBACK_WEATHER = {
+    "HSR Layout": {
+        "rain_24h_mm": 44.0,
+        "temp_c": 31.5,
+        "aqi": 162,
+        "humidity_pct": 78.0,
+        "wind_kph": 13.2,
+    },
+    "Whitefield": {
+        "rain_24h_mm": 12.0,
+        "temp_c": 30.0,
+        "aqi": 118,
+        "humidity_pct": 66.0,
+        "wind_kph": 9.8,
+    },
+    "Bellandur": {
+        "rain_24h_mm": 48.0,
+        "temp_c": 30.8,
+        "aqi": 188,
+        "humidity_pct": 80.0,
+        "wind_kph": 14.5,
+    },
 }
 
 
@@ -63,7 +81,13 @@ class WeatherService:
         coords = ZONES[zone]
         lat, lon = coords["lat"], coords["lon"]
 
-        conditions = {"rain_24h_mm": 0.0, "temp_c": 0.0, "aqi": 0.0, "humidity_pct": 0.0, "wind_kph": 0.0}
+        conditions = {
+            "rain_24h_mm": 0.0,
+            "temp_c": 0.0,
+            "aqi": 0.0,
+            "humidity_pct": 0.0,
+            "wind_kph": 0.0,
+        }
 
         async with httpx.AsyncClient(timeout=6.0) as client:
             weather_req = client.get(
@@ -77,7 +101,12 @@ class WeatherService:
             )
             air_req = client.get(
                 "https://air-quality-api.open-meteo.com/v1/air-quality",
-                params={"latitude": lat, "longitude": lon, "current": "european_aqi", "timezone": "auto"},
+                params={
+                    "latitude": lat,
+                    "longitude": lon,
+                    "current": "european_aqi",
+                    "timezone": "auto",
+                },
             )
             weather_res, air_res = await asyncio.gather(weather_req, air_req)
 
@@ -107,8 +136,11 @@ class WeatherService:
         if loop and loop.is_running():
             # We're inside an async context (e.g. FastAPI); run in a new thread.
             import concurrent.futures
+
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                return pool.submit(asyncio.run, WeatherService._live_conditions_async(zone)).result()
+                return pool.submit(
+                    asyncio.run, WeatherService._live_conditions_async(zone)
+                ).result()
         else:
             return asyncio.run(WeatherService._live_conditions_async(zone))
 
@@ -117,39 +149,43 @@ class WeatherService:
         if zone not in ZONES:
             raise ValueError(f"Unsupported zone: {zone}")
 
-        source = "fixture"
         if is_simulated:
-            conditions = SIMULATED_WEATHER.get(zone, SIMULATED_WEATHER["Whitefield"])
-        else:
-            try:
-                conditions = WeatherService._live_conditions_sync(zone)
-                source = "open-meteo"
-            except Exception:
-                # Fall back to fixture values to avoid hard failures in demo paths.
-                conditions = SIMULATED_WEATHER.get(zone, SIMULATED_WEATHER["Whitefield"])
-                source = "open-meteo-fallback-fixture"
+            logger.warning("is_simulated was requested for %s but is disabled", zone)
 
-        logger.info("Fetched hyper-local weather for boundary/ward %s (ward_level_data: True)", zone)
+        source = "open-meteo"
+        try:
+            conditions = WeatherService._live_conditions_sync(zone)
+        except Exception:
+            # Fall back to static values to avoid hard failures when upstream is unavailable.
+            conditions = FALLBACK_WEATHER.get(zone, FALLBACK_WEATHER["Whitefield"])
+            source = "open-meteo-fallback"
+
+        logger.info(
+            "Fetched hyper-local weather for boundary/ward %s (ward_level_data: True)",
+            zone,
+        )
         return {
             "zone": zone,
             "ward_level_data": True,
             "timestamp": _now_iso(),
             "source": source,
-            "is_simulated": is_simulated or source != "open-meteo",
-            "fixture_version": FIXTURE_VERSION,
+            "is_simulated": False,
+            "fixture_version": FIXTURE_VERSION if source != "open-meteo" else None,
             "conditions": conditions,
             "trigger_view": WeatherService._build_trigger_view(conditions),
         }
 
     @staticmethod
     def get_forecast_warnings(zone: str, is_simulated: bool = False) -> List[str]:
-        current = WeatherService.get_current_conditions(zone, is_simulated=is_simulated)
+        current = WeatherService.get_current_conditions(zone, is_simulated=False)
         warnings: List[str] = []
         trigger_view = current["trigger_view"]
         if trigger_view["heavy_rain"]["breached"]:
             warnings.append("Heavy Rain Advisory: Threshold conditions are breached.")
         if trigger_view["extreme_heat"]["breached"]:
-            warnings.append("Extreme Heat Advisory: Temperatures are at or above threshold.")
+            warnings.append(
+                "Extreme Heat Advisory: Temperatures are at or above threshold."
+            )
         if trigger_view["severe_aqi"]["breached"]:
             warnings.append("Severe AQI Advisory: Air quality threshold is breached.")
         return warnings

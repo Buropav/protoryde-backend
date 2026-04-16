@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.models import AuditLog, Claim, Policy, Rider
-from app.core.utils import read_json
+from app.services.bank_branch_service import get_zone_branch_metrics
 from app.services.forecast_service import generate_zone_forecast
 from app.services.ml_service import (
     is_ml_ready,
@@ -26,10 +26,6 @@ from app.services.model_monitoring import (
     resolve_prediction_actual,
 )
 from app.services.model_registry import bootstrap_registry_if_missing
-from app.services.payout_service import (
-    PayoutService,
-    TriggerEvent as PayoutTriggerEvent,
-)
 from app.services.policy_pdf import generate_policy_pdf, generate_ledger_pdf
 from app.services.pricing_service import PricingService
 from app.services.train_model import train_and_save_model
@@ -61,10 +57,6 @@ EXCLUSIONS = [
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
-
-
-def _read_json(name: str) -> Dict[str, Any]:
-    return read_json(os.path.join(DATA_DIR, name))
 
 
 def _check_enrollment_lockout(zone: str) -> List[str]:
@@ -118,7 +110,7 @@ def _predict_premium(
             "zone": zone,
             "forecast_features": forecast_features or {},
             "rider_features": rider_features or {},
-            "is_simulated": True,
+            "is_simulated": False,
         }
     )
     return {
@@ -138,11 +130,11 @@ def _ensure_rider_and_policy(
     if rider is None:
         rider = Rider(
             id=rider_id,
-            name="Demo Rider",
+            name="ProtoRyde Rider",
             phone=f"9{uuid4().hex[:9]}",
             delhivery_partner_id=f"DEL-{uuid4().hex[:8].upper()}",
             zone=zone,
-            upi_id="demo@okicici",
+            upi_id="rider@upi",
             avg_daily_earnings=1050.0,
             claim_rate_12wk=0.6,
             fraud_flag_count=0,
@@ -201,7 +193,6 @@ class TriggerSimulateRequest(BaseModel):
     zone: str = "HSR Layout"
     trigger_type: str = "HEAVY_RAIN"
     as_of: Optional[str] = None
-    is_simulated: bool = False
     trigger_value: Optional[float] = None
     rider_id: str = "rdr_demo_hsr"
     latitude: Optional[float] = None
@@ -220,16 +211,6 @@ class PolicyActivateRequest(BaseModel):
     weather_severity: Optional[float] = None
     claim_history: Optional[float] = None
     zone_risk_score: Optional[float] = None
-
-
-class DemoBootstrapRequest(BaseModel):
-    rider_id: str = "rdr_demo_hsr"
-    rider_name: str = Field(default="Pranav", alias="name")
-    zone: str = "HSR Layout"
-    upi_id: str = "pranav@okicici"
-    exclusions_accepted: bool = True
-
-    model_config = {"populate_by_name": True}
 
 
 class PaymentCollectRequest(BaseModel):
@@ -270,36 +251,6 @@ def get_model_status(db: Session = Depends(get_db)):
     }
     status["zone_defaults"] = {zone: zone_risk_score(zone) for zone in ZONES.keys()}
     return status
-
-
-@router.post("/demo/simulate-trigger")
-def simulate_trigger_demo_alias(
-    payload: TriggerSimulateRequest, db: Session = Depends(get_db)
-):
-    result = simulate_trigger(payload, db)
-    claim_preview = (result.get("claims_preview") or [{}])[0]
-    trigger_event = result.get("trigger_event") or {}
-    payout_result = PayoutService.process_trigger_payout(
-        rider_id=payload.rider_id,
-        trigger_event=PayoutTriggerEvent(
-            trigger_type=result.get("trigger_type", payload.trigger_type),
-            value=float(trigger_event.get("value", 0.0)),
-            threshold=float(trigger_event.get("threshold", 0.0)),
-            breached=bool(trigger_event.get("breached", False)),
-        ),
-        fraud_result={
-            "claim_id": claim_preview.get("claim_id", ""),
-            "recommended_payout": float(claim_preview.get("recommended_payout", 0.0)),
-        },
-        db=db,
-    )
-    return {
-        "claim_id": payout_result.claim_id,
-        "payout_amount": payout_result.payout_amount,
-        "utr_number": payout_result.utr_number,
-        "processed_in_seconds": payout_result.processed_in_seconds,
-        "simulation": result,
-    }
 
 
 @router.post("/admin/model-retrain")
@@ -430,9 +381,9 @@ def predict_premium(payload: PremiumPredictRequest, db: Session = Depends(get_db
 
 
 @router.get("/weather/current/{zone}")
-def get_current_weather(zone: str, is_simulated: bool = Query(False)):
+def get_current_weather(zone: str):
     try:
-        return WeatherService.get_current_conditions(zone, is_simulated=is_simulated)
+        return WeatherService.get_current_conditions(zone, is_simulated=False)
     except ValueError as exc:
         raise HTTPException(
             status_code=422, detail={"error": "UNSUPPORTED_ZONE", "message": str(exc)}
@@ -440,9 +391,9 @@ def get_current_weather(zone: str, is_simulated: bool = Query(False)):
 
 
 @router.get("/weather/warnings/{zone}")
-def get_weather_warnings(zone: str, is_simulated: bool = Query(False)):
+def get_weather_warnings(zone: str):
     try:
-        warnings = WeatherService.get_forecast_warnings(zone, is_simulated=is_simulated)
+        warnings = WeatherService.get_forecast_warnings(zone, is_simulated=False)
         return {"zone": zone, "warnings": warnings}
     except ValueError as exc:
         raise HTTPException(
@@ -491,27 +442,25 @@ def get_delhivery_metrics(zone: str, date: str):
         )
 
 
+@router.get("/bank/branches/{zone}")
 @router.get("/mock/branches/{zone}")
 def get_banking_metrics(zone: str):
-    data = _read_json("bank_branches.json")
-    record = data.get(zone)
-    if record is None:
+    if zone not in ZONES:
         raise HTTPException(
-            status_code=404,
-            detail={
-                "error": "ZONE_NOT_FOUND",
-                "message": f"No mock data for zone {zone}",
-            },
+            status_code=422,
+            detail={"error": "UNSUPPORTED_ZONE", "message": "Unsupported zone"},
         )
-    closure_rate_pct = round(float(record.get("closure_rate", 0.0)) * 100, 2)
+
+    metrics = get_zone_branch_metrics(zone)
     return {
-        "zone": zone,
-        "total_branches": int(record.get("total_branches", 0)),
-        "closed_branches": int(record.get("closed_branches", 0)),
-        "closure_rate_pct": closure_rate_pct,
-        "threshold_pct": 60.0,
-        "trigger_breached": closure_rate_pct >= 60.0,
-        "fixture_version": FIXTURE_VERSION,
+        "zone": metrics["zone"],
+        "total_branches": metrics["total_branches"],
+        "closed_branches": metrics["closed_branches"],
+        "closure_rate_pct": metrics["closure_rate_pct"],
+        "threshold_pct": metrics["threshold_pct"],
+        "trigger_breached": metrics["trigger_breached"],
+        "source": metrics["source"],
+        "fetched_at": metrics["fetched_at"],
     }
 
 
@@ -640,94 +589,6 @@ def activate_policy(payload: PolicyActivateRequest, db: Session = Depends(get_db
     }
 
 
-@router.post("/demo/bootstrap")
-def bootstrap_demo(payload: DemoBootstrapRequest, db: Session = Depends(get_db)):
-    if payload.zone not in ZONES:
-        raise HTTPException(
-            status_code=422,
-            detail={"error": "UNSUPPORTED_ZONE", "message": "Unsupported zone"},
-        )
-    if not payload.exclusions_accepted:
-        raise HTTPException(
-            status_code=422,
-            detail={
-                "error": "EXCLUSIONS_NOT_ACKNOWLEDGED",
-                "message": "Demo bootstrap requires exclusions acceptance",
-            },
-        )
-
-    rider = db.query(Rider).filter(Rider.id == payload.rider_id).first()
-    if rider is None:
-        rider = Rider(
-            id=payload.rider_id,
-            name=payload.rider_name,
-            phone=f"9{uuid4().hex[:9]}",
-            delhivery_partner_id=f"DEL-{uuid4().hex[:8].upper()}",
-            zone=payload.zone,
-            upi_id=payload.upi_id,
-            avg_daily_earnings=1050.0,
-            claim_rate_12wk=0.6,
-            fraud_flag_count=0,
-            kyc_verified=True,
-        )
-        db.add(rider)
-        db.flush()
-    else:
-        rider.name = payload.rider_name
-        rider.zone = payload.zone
-        rider.upi_id = payload.upi_id
-
-    policy = _ensure_rider_and_policy(
-        db, rider_id=payload.rider_id, zone=payload.zone, exclusions_acknowledged=True
-    )
-    premium = _predict_premium(
-        zone=payload.zone, forecast_features={}, rider_features={}, prefer_ml=True
-    )
-    policy.base_premium = premium["base_premium"]
-    policy.final_premium = premium["final_premium"]
-    policy.premium_breakdown = premium["adjustments"]
-    policy.status = "active"
-    policy.exclusions_acknowledged_at = _now()
-
-    db.add(
-        AuditLog(
-            entity_type="Demo",
-            entity_id=payload.rider_id,
-            action="DEMO_BOOTSTRAPPED",
-            metadata_json={
-                "rider_id": payload.rider_id,
-                "zone": payload.zone,
-                "policy_id": policy.id,
-            },
-        )
-    )
-    db.commit()
-    db.refresh(policy)
-
-    return {
-        "status": "ok",
-        "rider": {
-            "rider_id": rider.id,
-            "name": rider.name,
-            "zone": rider.zone,
-            "upi_id": rider.upi_id,
-            "kyc_verified": rider.kyc_verified,
-        },
-        "policy": {
-            "policy_id": policy.id,
-            "status": policy.status,
-            "base_premium": policy.base_premium,
-            "final_premium": policy.final_premium,
-            "premium_engine": premium["engine"],
-            "exclusions_version": EXCLUSIONS_VERSION,
-            "exclusions_acknowledged_at": policy.exclusions_acknowledged_at.isoformat()
-            if policy.exclusions_acknowledged_at
-            else None,
-        },
-        "lockout_status": get_policy_eligibility(payload.zone),
-    }
-
-
 @router.post("/triggers/simulate")
 def simulate_trigger(payload: TriggerSimulateRequest, db: Session = Depends(get_db)):
     trigger_type = payload.trigger_type.upper()
@@ -746,9 +607,7 @@ def simulate_trigger(payload: TriggerSimulateRequest, db: Session = Depends(get_
             detail={"error": "UNSUPPORTED_ZONE", "message": "Unsupported zone"},
         )
 
-    weather = WeatherService.get_current_conditions(
-        payload.zone, is_simulated=payload.is_simulated
-    )
+    weather = WeatherService.get_current_conditions(payload.zone, is_simulated=False)
     trigger_view = weather["trigger_view"]
 
     derived_value = payload.trigger_value
@@ -760,7 +619,7 @@ def simulate_trigger(payload: TriggerSimulateRequest, db: Session = Depends(get_
         elif trigger_type == "SEVERE_AQI":
             derived_value = float(trigger_view["severe_aqi"]["value"])
         elif trigger_type == "BRANCH_CLOSURE":
-            branch = get_banking_metrics(payload.zone)
+            branch = get_zone_branch_metrics(payload.zone)
             derived_value = float(branch["closure_rate_pct"])
         else:
             delhivery = get_delhivery_metrics(payload.zone, _now().date().isoformat())
@@ -776,7 +635,7 @@ def simulate_trigger(payload: TriggerSimulateRequest, db: Session = Depends(get_
         avg_daily_earnings=payload.avg_daily_earnings,
         duration_hours=payload.duration_hours,
         coverage_tier=policy.coverage_tier,
-        is_simulated=payload.is_simulated,
+        is_simulated=False,
         latitude=payload.latitude,
         longitude=payload.longitude,
         db=db,
@@ -790,7 +649,7 @@ def simulate_trigger(payload: TriggerSimulateRequest, db: Session = Depends(get_
         trigger_type=trigger_type,
         trigger_value=float(derived_value),
         trigger_threshold=float(result["trigger_event"]["threshold"]),
-        is_simulated=payload.is_simulated,
+        is_simulated=False,
         fraud_check_passed=result["fraud_check_passed"],
         fraud_layers=result["fraud_layers"],
         payout_amount=float(result["recommended_payout"]),
@@ -814,7 +673,7 @@ def simulate_trigger(payload: TriggerSimulateRequest, db: Session = Depends(get_
             metadata_json={
                 "zone": payload.zone,
                 "trigger_type": trigger_type,
-                "is_simulated": payload.is_simulated,
+                "is_simulated": False,
             },
         )
     )
@@ -836,7 +695,7 @@ def simulate_trigger(payload: TriggerSimulateRequest, db: Session = Depends(get_
                 "claim_id": result["claim_id"],
             }
         ],
-        "fixture_version": FIXTURE_VERSION if payload.is_simulated else None,
+        "fixture_version": None,
     }
 
 

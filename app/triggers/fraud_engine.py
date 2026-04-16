@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 from uuid import uuid4
 
-from app.core.utils import read_json
+from app.services.bank_branch_service import get_zone_branch_metrics
 from app.services.model_registry import get_model_entry
 from app.triggers.weather_service import FIXTURE_VERSION, ZONES
 
@@ -30,19 +30,22 @@ def _now_iso() -> str:
 
 def _load_delhivery(zone: str) -> Dict[str, Any]:
     import pandas as pd
+
     try:
         df = pd.read_csv(os.path.join(DATA_DIR, "delhivery_dataset.csv"))
-        zone_mask = df['source_name'].str.contains(zone, case=False, na=False) | df['destination_name'].str.contains(zone, case=False, na=False)
+        zone_mask = df["source_name"].str.contains(zone, case=False, na=False) | df[
+            "destination_name"
+        ].str.contains(zone, case=False, na=False)
         zone_df = df[zone_mask]
-        
+
         if len(zone_df) == 0:
             zone_df = df
-            
+
         total_orders = len(zone_df)
-        delayed = zone_df[zone_df['actual_time'] > zone_df['osrm_time'] * 1.5]
+        delayed = zone_df[zone_df["actual_time"] > zone_df["osrm_time"] * 1.5]
         cancelled_orders = len(delayed)
         cancellation_rate = cancelled_orders / total_orders if total_orders > 0 else 0.0
-        
+
     except Exception as e:
         logger.warning(f"Failed to load real delhivery dataset: {e}")
         total_orders = 20
@@ -58,15 +61,12 @@ def _load_delhivery(zone: str) -> Dict[str, Any]:
 
 
 def _load_branches(zone: str) -> Dict[str, Any]:
-    data = read_json(os.path.join(DATA_DIR, "bank_branches.json"))
-    entry = data.get(
-        zone, {"total_branches": 10, "closed_branches": 0, "closure_rate": 0.0}
-    )
+    metrics = get_zone_branch_metrics(zone)
     return {
-        "total_branches": int(entry.get("total_branches", 0)),
-        "closed_branches": int(entry.get("closed_branches", 0)),
-        "closure_rate_pct": round(float(entry.get("closure_rate", 0.0)) * 100, 2),
-        "fixture_version": FIXTURE_VERSION,
+        "total_branches": int(metrics.get("total_branches", 0)),
+        "closed_branches": int(metrics.get("closed_branches", 0)),
+        "closure_rate_pct": float(metrics.get("closure_rate_pct", 0.0)),
+        "source": metrics.get("source", "unknown"),
     }
 
 
@@ -236,7 +236,7 @@ class FraudEngine:
 
         fraud_check_passed = all(item["passed"] for item in fraud_layers)
         raw_payout = (avg_daily_earnings * (duration_hours / 9.0)) * 0.80
-        
+
         coverage_cap = 2800.0 if coverage_tier == "ENHANCED" else 2300.0
         recommended_payout = (
             round(min(raw_payout, coverage_cap), 2) if fraud_check_passed else 0.0

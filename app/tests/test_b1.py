@@ -16,7 +16,6 @@ response = client.post(
         "rider_id": "rdr_demo_hsr",
         "zone": "HSR Layout",
         "trigger_type": "HEAVY_RAIN",
-        "is_simulated": True,
         "avg_daily_earnings": 1050.0,
         "duration_hours": 9.0,
     },
