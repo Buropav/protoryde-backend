@@ -213,6 +213,22 @@ class PolicyActivateRequest(BaseModel):
     zone_risk_score: Optional[float] = None
 
 
+class DemoBootstrapRequest(BaseModel):
+    rider_id: str
+    rider_name: Optional[str] = Field(default=None, alias="name")
+    zone: str = "HSR Layout"
+    upi_id: Optional[str] = None
+    exclusions_accepted: bool = True
+    forecast_features: Dict[str, Any] = Field(default_factory=dict)
+    rider_features: Dict[str, Any] = Field(default_factory=dict)
+    prefer_ml: bool = True
+    weather_severity: Optional[float] = None
+    claim_history: Optional[float] = None
+    zone_risk_score: Optional[float] = None
+
+    model_config = {"populate_by_name": True}
+
+
 class PaymentCollectRequest(BaseModel):
     rider_id: str
     policy_id: str
@@ -587,6 +603,69 @@ def activate_policy(payload: PolicyActivateRequest, db: Session = Depends(get_db
         if policy.exclusions_acknowledged_at
         else None,
     }
+
+
+@router.post("/demo/bootstrap")
+def bootstrap_demo_alias(payload: DemoBootstrapRequest, db: Session = Depends(get_db)):
+    rider = db.query(Rider).filter(Rider.id == payload.rider_id).first()
+    rider_name = payload.rider_name or "ProtoRyde Rider"
+    rider_upi = payload.upi_id or "rider@upi"
+
+    if rider is None:
+        rider = Rider(
+            id=payload.rider_id,
+            name=rider_name,
+            phone=f"9{uuid4().hex[:9]}",
+            delhivery_partner_id=f"DEL-{uuid4().hex[:8].upper()}",
+            zone=payload.zone,
+            upi_id=rider_upi,
+            avg_daily_earnings=1050.0,
+            claim_rate_12wk=0.6,
+            fraud_flag_count=0,
+            kyc_verified=True,
+        )
+        db.add(rider)
+        db.flush()
+    else:
+        rider.name = rider_name
+        rider.zone = payload.zone
+        rider.upi_id = rider_upi
+
+    policy_response = activate_policy(
+        PolicyActivateRequest(
+            rider_id=payload.rider_id,
+            zone=payload.zone,
+            exclusions_accepted=payload.exclusions_accepted,
+            forecast_features=payload.forecast_features,
+            rider_features=payload.rider_features,
+            prefer_ml=payload.prefer_ml,
+            weather_severity=payload.weather_severity,
+            claim_history=payload.claim_history,
+            zone_risk_score=payload.zone_risk_score,
+        ),
+        db,
+    )
+
+    db.refresh(rider)
+    return {
+        "status": "ok",
+        "rider": {
+            "rider_id": rider.id,
+            "name": rider.name,
+            "zone": rider.zone,
+            "upi_id": rider.upi_id,
+            "kyc_verified": rider.kyc_verified,
+        },
+        "policy": policy_response,
+        "lockout_status": get_policy_eligibility(payload.zone),
+    }
+
+
+@router.post("/demo/simulate-trigger")
+def simulate_trigger_demo_alias(
+    payload: TriggerSimulateRequest, db: Session = Depends(get_db)
+):
+    return simulate_trigger(payload, db)
 
 
 @router.post("/triggers/simulate")
