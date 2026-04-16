@@ -3,9 +3,17 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from app.services.model_registry import (
+    MODELS_DIR,
+    bootstrap_registry_if_missing,
+    get_model_entry,
+    sync_model_artifact,
+)
+
 logger = logging.getLogger(__name__)
 
-MODEL_PATH = Path(__file__).resolve().parent.parent / "models" / "model.pkl"
+MODEL_KEY = "premium_xgboost"
+MODEL_PATH = MODELS_DIR / "model.pkl"
 FEATURE_NAMES = ["zone_risk_score", "weather_severity", "claim_history", "season_risk"]
 FEATURE_LABELS = {
     "zone_risk_score": "Zone Flood / Risk Score",
@@ -28,14 +36,16 @@ _MODEL = None
 _EXPLAINER = None
 _ML_ERROR = None
 _ML_LOADED = False
+_MODEL_VERSION = "v0.0.0"
 
 
 def _lazy_load_model() -> None:
     """Load the ML model and SHAP explainer on first use, not at import time."""
-    global _MODEL, _EXPLAINER, _ML_ERROR, _ML_LOADED
+    global _MODEL, _EXPLAINER, _ML_ERROR, _ML_LOADED, _MODEL_VERSION
     if _ML_LOADED:
         return
     _ML_LOADED = True
+    bootstrap_registry_if_missing()
     try:
         import joblib
         import shap
@@ -43,6 +53,14 @@ def _lazy_load_model() -> None:
         if MODEL_PATH.exists():
             _MODEL = joblib.load(MODEL_PATH)
             _EXPLAINER = shap.TreeExplainer(_MODEL)
+            sync_model_artifact(
+                model_key=MODEL_KEY,
+                artifact_path=MODEL_PATH,
+                framework="xgboost",
+                metadata={"service": "ml_service", "lazy_loaded": True},
+                bump_version=False,
+            )
+            _MODEL_VERSION = get_model_entry(MODEL_KEY).get("version", "v0.0.0")
             logger.info("ML model loaded from %s", MODEL_PATH)
         else:
             _ML_ERROR = f"model.pkl not found at {MODEL_PATH}"
@@ -59,11 +77,29 @@ def is_ml_ready() -> bool:
 
 def ml_status() -> Dict[str, Any]:
     _lazy_load_model()
+    model_entry = get_model_entry(MODEL_KEY)
     return {
         "ready": _MODEL is not None and _EXPLAINER is not None,
         "model_path": str(MODEL_PATH),
+        "model_version": _MODEL_VERSION,
+        "model_framework": model_entry.get("framework", "xgboost"),
+        "artifact_sha256": model_entry.get("artifact_sha256"),
         "error": _ML_ERROR,
     }
+
+
+def premium_model_version() -> str:
+    _lazy_load_model()
+    return _MODEL_VERSION
+
+
+def invalidate_model_cache() -> None:
+    global _MODEL, _EXPLAINER, _ML_ERROR, _ML_LOADED, _MODEL_VERSION
+    _MODEL = None
+    _EXPLAINER = None
+    _ML_ERROR = None
+    _ML_LOADED = False
+    _MODEL_VERSION = "v0.0.0"
 
 
 def zone_risk_score(zone: str) -> float:
@@ -91,7 +127,14 @@ def predict_with_shap(
 
     zr = explicit_zone_risk if explicit_zone_risk is not None else zone_risk_score(zone)
     sr = season_risk if season_risk is not None else _current_season_risk()
-    X = pd.DataFrame([[zr, float(weather_severity), float(claim_history), sr]], columns=FEATURE_NAMES)
+    X = pd.DataFrame(
+        {
+            "zone_risk_score": [float(zr)],
+            "weather_severity": [float(weather_severity)],
+            "claim_history": [float(claim_history)],
+            "season_risk": [float(sr)],
+        }
+    )
     predicted = float(_MODEL.predict(X)[0])
 
     shap_values = _EXPLAINER.shap_values(X)
@@ -130,4 +173,3 @@ def predict_with_shap(
         "adjustment_total": adjustment_total,
         "model_status": ml_status(),
     }
-

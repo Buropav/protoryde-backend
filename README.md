@@ -27,6 +27,10 @@ uvicorn main:app --reload --port 8000
 - Premium prediction (ML-first with fallback): `POST /api/premium/predict`
 - Policy PDF download: `GET /api/policies/{rider_id}/current/document`
 - Optional local model training: `python app/services/train_model.py`
+- Forecast: `GET /api/forecast/{zone}` (Prophet-first, fallback when Prophet unavailable)
+- Model monitoring summary: `GET /api/admin/model-monitoring`
+- Resolve actual outcome for a prediction: `POST /api/admin/model-monitoring/resolve`
+- Retrain all models immediately: `POST /api/admin/model-retrain`
 
 ## Demo-Critical Endpoints
 - `POST /api/demo/bootstrap`
@@ -66,3 +70,4 @@ See full guide: `docs/RENDER_FIRST_DEPLOY.md`
 ### Notes
 - The app normalizes `postgres://` to `postgresql://` automatically for SQLAlchemy compatibility.
 - `model.pkl` is optional; premium prediction falls back to the rule engine when the model is absent.
+- Scheduled retraining is optional and controlled by `ENABLE_ML_RETRAIN` and `ML_RETRAIN_INTERVAL_HOURS`.

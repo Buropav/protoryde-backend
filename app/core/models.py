@@ -1,7 +1,17 @@
-from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, ForeignKey, JSON
+from sqlalchemy import (
+    Column,
+    Integer,
+    String,
+    Float,
+    Boolean,
+    DateTime,
+    ForeignKey,
+    JSON,
+)
 from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
 from app.core.database import Base
+
 
 class Rider(Base):
     __tablename__ = "riders"
@@ -21,6 +31,7 @@ class Rider(Base):
     policies = relationship("Policy", back_populates="rider")
     claims = relationship("Claim", back_populates="rider")
 
+
 class Policy(Base):
     __tablename__ = "policies"
 
@@ -30,14 +41,15 @@ class Policy(Base):
     week_end_date = Column(DateTime)
     base_premium = Column(Float)
     final_premium = Column(Float)
-    premium_breakdown = Column(JSON) # Stores SHAP values block
+    premium_breakdown = Column(JSON)  # Stores SHAP values block
     coverage_cap = Column(Float)
-    status = Column(String) # active, expired, cancelled
+    status = Column(String)  # active, expired, cancelled
     exclusions_acknowledged_at = Column(DateTime)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     rider = relationship("Rider", back_populates="policies")
     claims = relationship("Claim", back_populates="policy")
+
 
 class Claim(Base):
     __tablename__ = "claims"
@@ -61,6 +73,7 @@ class Claim(Base):
     policy = relationship("Policy", back_populates="claims")
     rider = relationship("Rider", back_populates="claims")
 
+
 class TriggerEvent(Base):
     __tablename__ = "trigger_events"
 
@@ -73,12 +86,31 @@ class TriggerEvent(Base):
     duration_hours = Column(Integer)
     active = Column(Boolean, default=True)
 
+
 class AuditLog(Base):
     __tablename__ = "audit_log"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
-    entity_type = Column(String) # Types: Rider, Policy, Claim, Simulation
+    entity_type = Column(String)  # Types: Rider, Policy, Claim, Simulation
     entity_id = Column(String)
     action = Column(String)
     metadata_json = Column(JSON)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class MLPredictionLog(Base):
+    __tablename__ = "ml_prediction_log"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    model_name = Column(String, index=True)
+    model_version = Column(String, index=True)
+    task_type = Column(String, index=True)
+    zone = Column(String, index=True)
+    rider_id = Column(String, index=True)
+    target_date = Column(DateTime, index=True)
+    prediction_value = Column(Float)
+    actual_value = Column(Float)
+    absolute_error = Column(Float)
+    metadata_json = Column(JSON)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    resolved_at = Column(DateTime)

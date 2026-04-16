@@ -9,3 +9,4 @@ env/
 .venv
 *.pkl
 *.db
+app/models/*.json

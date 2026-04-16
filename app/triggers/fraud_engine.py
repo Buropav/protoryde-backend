@@ -2,11 +2,13 @@ import json
 import logging
 import math
 import os
+from pathlib import Path
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 from uuid import uuid4
 
 from app.core.utils import read_json
+from app.services.model_registry import get_model_entry
 from app.triggers.weather_service import FIXTURE_VERSION, ZONES
 
 logger = logging.getLogger(__name__)
@@ -57,7 +59,9 @@ def _load_delhivery(zone: str) -> Dict[str, Any]:
 
 def _load_branches(zone: str) -> Dict[str, Any]:
     data = read_json(os.path.join(DATA_DIR, "bank_branches.json"))
-    entry = data.get(zone, {"total_branches": 10, "closed_branches": 0, "closure_rate": 0.0})
+    entry = data.get(
+        zone, {"total_branches": 10, "closed_branches": 0, "closure_rate": 0.0}
+    )
     return {
         "total_branches": int(entry.get("total_branches", 0)),
         "closed_branches": int(entry.get("closed_branches", 0)),
@@ -71,12 +75,15 @@ def _audit(event: Dict[str, Any], db=None) -> None:
     if db is not None:
         try:
             from app.core.models import AuditLog
-            db.add(AuditLog(
-                entity_type=event.get("entity_type", "FraudTrace"),
-                entity_id=event.get("entity_id", ""),
-                action="FRAUD_TRACE",
-                metadata_json=event,
-            ))
+
+            db.add(
+                AuditLog(
+                    entity_type=event.get("entity_type", "FraudTrace"),
+                    entity_id=event.get("entity_id", ""),
+                    action="FRAUD_TRACE",
+                    metadata_json=event,
+                )
+            )
             # Don't commit here — let the caller's transaction handle it.
             return
         except Exception as exc:
@@ -90,19 +97,44 @@ def _audit(event: Dict[str, Any], db=None) -> None:
     except OSError:
         logger.warning("File audit write failed for event %s", event.get("entity_id"))
 
+
 IFOREST_MODEL_PATH = os.path.join(DATA_DIR, "..", "models", "isolation_forest.pkl")
 _iforest_model = None
+_iforest_model_version = "v0.0.0"
+
 
 def _load_iforest_model():
-    global _iforest_model
+    global _iforest_model, _iforest_model_version
     if _iforest_model is None and os.path.exists(IFOREST_MODEL_PATH):
         try:
             import pickle
+
             with open(IFOREST_MODEL_PATH, "rb") as f:
                 _iforest_model = pickle.load(f)
+            model_entry = get_model_entry("fraud_iforest")
+            _iforest_model_version = model_entry.get("version", "v0.0.0")
         except Exception as e:
             logger.error("Failed to load Isolation Forest model: %s", e)
     return _iforest_model
+
+
+def iforest_model_status() -> Dict[str, Any]:
+    model_entry = get_model_entry("fraud_iforest")
+    model_path = Path(IFOREST_MODEL_PATH)
+    return {
+        "ready": _load_iforest_model() is not None,
+        "model_path": str(model_path.resolve()),
+        "model_version": model_entry.get("version", _iforest_model_version),
+        "model_framework": model_entry.get("framework", "sklearn_isolation_forest"),
+        "artifact_sha256": model_entry.get("artifact_sha256"),
+    }
+
+
+def reset_iforest_cache() -> None:
+    global _iforest_model, _iforest_model_version
+    _iforest_model = None
+    _iforest_model_version = "v0.0.0"
+
 
 class FraudEngine:
     @staticmethod
@@ -131,11 +163,12 @@ class FraudEngine:
         # L1: weather/environment threshold
         l1_passed = trigger_value >= threshold
         l1_reason = f"{trigger_value} vs {threshold} threshold"
-        
+
         model = _load_iforest_model()
         if model is not None and l1_passed:
             try:
                 import numpy as np
+
                 X = np.array([[float(avg_daily_earnings), float(duration_hours)]])
                 if model.predict(X)[0] == -1:
                     l1_passed = False
@@ -147,7 +180,9 @@ class FraudEngine:
         if latitude is not None and longitude is not None:
             zone_center = ZONES[zone]
             lat_diff = latitude - zone_center["lat"]
-            lon_diff = (longitude - zone_center["lon"]) * math.cos(math.radians(zone_center["lat"]))
+            lon_diff = (longitude - zone_center["lon"]) * math.cos(
+                math.radians(zone_center["lat"])
+            )
             dist_km = math.hypot(lat_diff, lon_diff) * 111.0
             l2_passed = dist_km <= 5.0
             l2_reason = f"GPS distance from zone center: {dist_km:.2f}km"
@@ -172,22 +207,48 @@ class FraudEngine:
         )
 
         fraud_layers = [
-            {"layer": "L1_WEATHER_THRESHOLD", "passed": l1_passed, "reason": l1_reason, "evidence": {"value": trigger_value, "threshold": threshold}},
-            {"layer": "L2_ZONE_PRESENCE", "passed": l2_passed, "reason": l2_reason, "evidence": l2_evidence},
-            {"layer": "L3_DELHIVERY_CROSS_REF", "passed": l3_passed, "reason": l3_reason, "evidence": delhivery},
-            {"layer": "L4_BRANCH_CLOSURE_CHECK", "passed": l4_passed, "reason": l4_reason, "evidence": branches},
+            {
+                "layer": "L1_WEATHER_THRESHOLD",
+                "passed": l1_passed,
+                "reason": l1_reason,
+                "evidence": {"value": trigger_value, "threshold": threshold},
+            },
+            {
+                "layer": "L2_ZONE_PRESENCE",
+                "passed": l2_passed,
+                "reason": l2_reason,
+                "evidence": l2_evidence,
+            },
+            {
+                "layer": "L3_DELHIVERY_CROSS_REF",
+                "passed": l3_passed,
+                "reason": l3_reason,
+                "evidence": delhivery,
+            },
+            {
+                "layer": "L4_BRANCH_CLOSURE_CHECK",
+                "passed": l4_passed,
+                "reason": l4_reason,
+                "evidence": branches,
+            },
         ]
 
         fraud_check_passed = all(item["passed"] for item in fraud_layers)
         raw_payout = (avg_daily_earnings * (duration_hours / 9.0)) * 0.80
-        recommended_payout = round(min(raw_payout, 2300.0), 2) if fraud_check_passed else 0.0
+        recommended_payout = (
+            round(min(raw_payout, 2300.0), 2) if fraud_check_passed else 0.0
+        )
 
         result = {
             "claim_id": f"clm_{uuid4().hex[:10]}",
             "rider_id": rider_id,
             "zone": zone,
             "trigger_type": trigger_type,
-            "trigger_event": {"value": trigger_value, "threshold": threshold, "breached": trigger_value >= threshold},
+            "trigger_event": {
+                "value": trigger_value,
+                "threshold": threshold,
+                "breached": trigger_value >= threshold,
+            },
             "fraud_check_passed": fraud_check_passed,
             "fraud_layers": fraud_layers,
             "recommended_payout": recommended_payout,
@@ -195,6 +256,13 @@ class FraudEngine:
             "fixture_version": FIXTURE_VERSION if is_simulated else None,
         }
 
-        _audit({"event": "fraud_trace", "entity_type": "claim", "entity_id": result["claim_id"], "details": result}, db=db)
+        _audit(
+            {
+                "event": "fraud_trace",
+                "entity_type": "claim",
+                "entity_id": result["claim_id"],
+                "details": result,
+            },
+            db=db,
+        )
         return result
-

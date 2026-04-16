@@ -12,10 +12,33 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.models import AuditLog, Claim, Policy, Rider
 from app.core.utils import read_json
-from app.services.ml_service import is_ml_ready, ml_status, predict_with_shap, zone_risk_score
+from app.services.forecast_service import generate_zone_forecast
+from app.services.ml_service import (
+    is_ml_ready,
+    ml_status,
+    predict_with_shap,
+    premium_model_version,
+    zone_risk_score,
+)
+from app.services.model_monitoring import (
+    compute_model_health,
+    log_prediction,
+    resolve_prediction_actual,
+)
+from app.services.model_registry import bootstrap_registry_if_missing
+from app.services.payout_service import (
+    PayoutService,
+    TriggerEvent as PayoutTriggerEvent,
+)
 from app.services.policy_pdf import generate_policy_pdf, generate_ledger_pdf
 from app.services.pricing_service import PricingService
-from app.triggers.fraud_engine import FraudEngine, TRIGGER_THRESHOLDS
+from app.services.train_model import train_and_save_model
+from app.services.fraud_model_training import train_iforest_and_save
+from app.triggers.fraud_engine import (
+    FraudEngine,
+    TRIGGER_THRESHOLDS,
+    iforest_model_status,
+)
 from app.triggers.weather_service import FIXTURE_VERSION, WeatherService, ZONES
 
 router = APIRouter(prefix="/api", tags=["simulation_and_integrations"])
@@ -70,10 +93,14 @@ def _predict_premium(
         ml_payload = predict_with_shap(
             zone=zone,
             weather_severity=float(
-                weather_severity if weather_severity is not None else (forecast_features or {}).get("weather_severity", 2.0)
+                weather_severity
+                if weather_severity is not None
+                else (forecast_features or {}).get("weather_severity", 2.0)
             ),
             claim_history=float(
-                claim_history if claim_history is not None else (rider_features or {}).get("claim_history", 1.0)
+                claim_history
+                if claim_history is not None
+                else (rider_features or {}).get("claim_history", 1.0)
             ),
             explicit_zone_risk=explicit_zone_risk,
         )
@@ -104,7 +131,9 @@ def _predict_premium(
     }
 
 
-def _ensure_rider_and_policy(db: Session, rider_id: str, zone: str, exclusions_acknowledged: bool = True) -> Policy:
+def _ensure_rider_and_policy(
+    db: Session, rider_id: str, zone: str, exclusions_acknowledged: bool = True
+) -> Policy:
     rider = db.query(Rider).filter(Rider.id == rider_id).first()
     if rider is None:
         rider = Rider(
@@ -123,15 +152,23 @@ def _ensure_rider_and_policy(db: Session, rider_id: str, zone: str, exclusions_a
         db.flush()
 
     now = _now()
-    week_start = now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=now.weekday())
+    week_start = now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(
+        days=now.weekday()
+    )
     week_end = week_start + timedelta(days=6, hours=23, minutes=59, seconds=59)
     policy = (
         db.query(Policy)
-        .filter(Policy.rider_id == rider_id, Policy.week_start_date >= week_start, Policy.status == "active")
+        .filter(
+            Policy.rider_id == rider_id,
+            Policy.week_start_date >= week_start,
+            Policy.status == "active",
+        )
         .first()
     )
     if policy is None:
-        premium = _predict_premium(zone=zone, forecast_features={}, rider_features={}, prefer_ml=True)
+        premium = _predict_premium(
+            zone=zone, forecast_features={}, rider_features={}, prefer_ml=True
+        )
         policy = Policy(
             id=f"pol_{uuid4().hex[:10]}",
             rider_id=rider_id,
@@ -222,16 +259,107 @@ def get_exclusions():
 
 @router.get("/admin/model-status")
 @router.get("/premium/model-status")
-def get_model_status():
+def get_model_status(db: Session = Depends(get_db)):
+    bootstrap_registry_if_missing()
     status = ml_status()
+    status["fraud_model"] = iforest_model_status()
+    status["monitoring"] = {
+        "premium_xgboost": compute_model_health(db=db, model_name="premium_xgboost"),
+        "forecast_prophet": compute_model_health(db=db, model_name="forecast_prophet"),
+    }
     status["zone_defaults"] = {zone: zone_risk_score(zone) for zone in ZONES.keys()}
     return status
 
 
+@router.post("/demo/simulate-trigger")
+def simulate_trigger_demo_alias(
+    payload: TriggerSimulateRequest, db: Session = Depends(get_db)
+):
+    result = simulate_trigger(payload, db)
+    claim_preview = (result.get("claims_preview") or [{}])[0]
+    trigger_event = result.get("trigger_event") or {}
+    payout_result = PayoutService.process_trigger_payout(
+        rider_id=payload.rider_id,
+        trigger_event=PayoutTriggerEvent(
+            trigger_type=result.get("trigger_type", payload.trigger_type),
+            value=float(trigger_event.get("value", 0.0)),
+            threshold=float(trigger_event.get("threshold", 0.0)),
+            breached=bool(trigger_event.get("breached", False)),
+        ),
+        fraud_result={
+            "claim_id": claim_preview.get("claim_id", ""),
+            "recommended_payout": float(claim_preview.get("recommended_payout", 0.0)),
+        },
+        db=db,
+    )
+    return {
+        "claim_id": payout_result.claim_id,
+        "payout_amount": payout_result.payout_amount,
+        "utr_number": payout_result.utr_number,
+        "processed_in_seconds": payout_result.processed_in_seconds,
+        "simulation": result,
+    }
+
+
+@router.post("/admin/model-retrain")
+def retrain_models(db: Session = Depends(get_db)):
+    premium_path = train_and_save_model(db=db)
+    fraud_path = train_iforest_and_save(db=db)
+    forecast_snapshot = generate_zone_forecast(
+        zone="HSR Layout", db=db, horizon_days=7, bump_model_version=True
+    )
+    return {
+        "status": "ok",
+        "premium_model_path": premium_path,
+        "fraud_model_path": fraud_path,
+        "forecast_model": {
+            "model": forecast_snapshot["model"],
+            "model_version": forecast_snapshot["model_version"],
+            "fallback_mode": forecast_snapshot["fallback_mode"],
+        },
+    }
+
+
+class ResolvePredictionRequest(BaseModel):
+    prediction_id: int
+    actual_value: float
+    metadata_patch: Dict[str, Any] = Field(default_factory=dict)
+
+
+@router.post("/admin/model-monitoring/resolve")
+def resolve_prediction(
+    payload: ResolvePredictionRequest, db: Session = Depends(get_db)
+):
+    row = resolve_prediction_actual(
+        db=db,
+        prediction_id=payload.prediction_id,
+        actual_value=payload.actual_value,
+        metadata_patch=payload.metadata_patch,
+    )
+    return {
+        "prediction_id": row.id,
+        "model_name": row.model_name,
+        "absolute_error": row.absolute_error,
+        "resolved_at": row.resolved_at.isoformat() if row.resolved_at else None,
+    }
+
+
+@router.get("/admin/model-monitoring")
+def get_model_monitoring(
+    model_name: Optional[str] = Query(default=None),
+    zone: Optional[str] = Query(default=None),
+    db: Session = Depends(get_db),
+):
+    return compute_model_health(db=db, model_name=model_name, zone=zone)
+
+
 @router.post("/premium/predict")
-def predict_premium(payload: PremiumPredictRequest):
+def predict_premium(payload: PremiumPredictRequest, db: Session = Depends(get_db)):
     if payload.zone not in ZONES:
-        raise HTTPException(status_code=422, detail={"error": "UNSUPPORTED_ZONE", "message": "Zone is not supported"})
+        raise HTTPException(
+            status_code=422,
+            detail={"error": "UNSUPPORTED_ZONE", "message": "Zone is not supported"},
+        )
     premium = _predict_premium(
         zone=payload.zone,
         forecast_features=payload.forecast_features,
@@ -241,20 +369,21 @@ def predict_premium(payload: PremiumPredictRequest):
         weather_severity=payload.weather_severity,
         claim_history=payload.claim_history,
     )
-    
+
     now = datetime.now()
     month = now.month
+    next_review_date = datetime(year=now.year, month=10, day=1).isoformat()
     if 6 <= month <= 9:
         season = "MONSOON"
         season_multiplier = 1.6
         rationale = "Monsoon season + high-risk zone = elevated premium"
-        if now.month <= 12:
-            next_review_date = datetime(year=now.year, month=10, day=1).isoformat()
     elif 11 <= month or month == 1:
         season = "WINTER"
         season_multiplier = 1.2
         rationale = "Winter season + elevated fog risk"
-        next_review_date = datetime(year=now.year + (1 if month >= 11 else 0), month=2, day=1).isoformat()
+        next_review_date = datetime(
+            year=now.year + (1 if month >= 11 else 0), month=2, day=1
+        ).isoformat()
     else:
         season = "SUMMER"
         season_multiplier = 1.0
@@ -262,6 +391,26 @@ def predict_premium(payload: PremiumPredictRequest):
         next_review_date = datetime(year=now.year, month=6, day=1).isoformat()
 
     zone_multiplier = 1.4 if "HSR" in payload.zone else 1.1
+
+    if premium["engine"] == "ml_shap":
+        log_prediction(
+            db=db,
+            model_name="premium_xgboost",
+            model_version=premium_model_version(),
+            task_type="premium_amount",
+            zone=payload.zone,
+            rider_id=(payload.rider_features or {}).get("rider_id"),
+            target_date=None,
+            prediction_value=float(premium["final_premium"]),
+            metadata={
+                "season": season,
+                "season_multiplier": season_multiplier,
+                "zone_multiplier": zone_multiplier,
+                "next_review_date": next_review_date,
+            },
+            commit=False,
+        )
+        db.commit()
 
     return {
         "zone": payload.zone,
@@ -284,7 +433,9 @@ def get_current_weather(zone: str, is_simulated: bool = Query(False)):
     try:
         return WeatherService.get_current_conditions(zone, is_simulated=is_simulated)
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail={"error": "UNSUPPORTED_ZONE", "message": str(exc)}) from exc
+        raise HTTPException(
+            status_code=422, detail={"error": "UNSUPPORTED_ZONE", "message": str(exc)}
+        ) from exc
 
 
 @router.get("/weather/warnings/{zone}")
@@ -293,7 +444,9 @@ def get_weather_warnings(zone: str, is_simulated: bool = Query(False)):
         warnings = WeatherService.get_forecast_warnings(zone, is_simulated=is_simulated)
         return {"zone": zone, "warnings": warnings}
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail={"error": "UNSUPPORTED_ZONE", "message": str(exc)}) from exc
+        raise HTTPException(
+            status_code=422, detail={"error": "UNSUPPORTED_ZONE", "message": str(exc)}
+        ) from exc
 
 
 @router.get("/mock/delhivery/{zone}/{date}")
@@ -328,7 +481,13 @@ def get_banking_metrics(zone: str):
     data = _read_json("bank_branches.json")
     record = data.get(zone)
     if record is None:
-        raise HTTPException(status_code=404, detail={"error": "ZONE_NOT_FOUND", "message": f"No mock data for zone {zone}"})
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error": "ZONE_NOT_FOUND",
+                "message": f"No mock data for zone {zone}",
+            },
+        )
     closure_rate_pct = round(float(record.get("closure_rate", 0.0)) * 100, 2)
     return {
         "zone": zone,
@@ -344,13 +503,15 @@ def get_banking_metrics(zone: str):
 @router.get("/policy/eligibility")
 def get_policy_eligibility(zone: str):
     if zone not in ZONES:
-        raise HTTPException(status_code=422, detail={"error": "UNSUPPORTED_ZONE", "message": "Unsupported zone"})
-    
+        raise HTTPException(
+            status_code=422,
+            detail={"error": "UNSUPPORTED_ZONE", "message": "Unsupported zone"},
+        )
+
     weather = WeatherService.get_current_conditions(zone, is_simulated=False)
-    
     lockout_active = False
     reason = None
-    
+
     if weather["conditions"]["aqi"] > 500:
         lockout_active = True
         reason = "Severe AQI weather advisory active. Enrollment paused for 48 hours to prevent adverse selection."
@@ -362,7 +523,9 @@ def get_policy_eligibility(zone: str):
         "zone": zone,
         "lockout_active": lockout_active,
         "reason": reason,
-        "expires_at": (datetime.now() + timedelta(hours=48)).isoformat() if lockout_active else None
+        "expires_at": (datetime.now() + timedelta(hours=48)).isoformat()
+        if lockout_active
+        else None,
     }
 
 
@@ -381,11 +544,17 @@ def get_enrollment_lockout_status(zone: str):
 @router.post("/policies/activate")
 def activate_policy(payload: PolicyActivateRequest, db: Session = Depends(get_db)):
     if payload.zone not in ZONES:
-        raise HTTPException(status_code=422, detail={"error": "UNSUPPORTED_ZONE", "message": "Unsupported zone"})
+        raise HTTPException(
+            status_code=422,
+            detail={"error": "UNSUPPORTED_ZONE", "message": "Unsupported zone"},
+        )
     if not payload.exclusions_accepted:
         raise HTTPException(
             status_code=422,
-            detail={"error": "EXCLUSIONS_NOT_ACKNOWLEDGED", "message": "Policy activation requires exclusions acceptance"},
+            detail={
+                "error": "EXCLUSIONS_NOT_ACKNOWLEDGED",
+                "message": "Policy activation requires exclusions acceptance",
+            },
         )
     # --- Adverse selection guard (Checklist #8) ---
     active_warnings = _check_enrollment_lockout(payload.zone)
@@ -399,7 +568,9 @@ def activate_policy(payload: PolicyActivateRequest, db: Session = Depends(get_db
             },
         )
 
-    policy = _ensure_rider_and_policy(db, rider_id=payload.rider_id, zone=payload.zone, exclusions_acknowledged=True)
+    policy = _ensure_rider_and_policy(
+        db, rider_id=payload.rider_id, zone=payload.zone, exclusions_acknowledged=True
+    )
     premium = _predict_premium(
         zone=payload.zone,
         forecast_features=payload.forecast_features,
@@ -421,7 +592,11 @@ def activate_policy(payload: PolicyActivateRequest, db: Session = Depends(get_db
             entity_type="Policy",
             entity_id=policy.id,
             action="POLICY_ACTIVATED",
-            metadata_json={"rider_id": payload.rider_id, "zone": payload.zone, "exclusions_version": EXCLUSIONS_VERSION},
+            metadata_json={
+                "rider_id": payload.rider_id,
+                "zone": payload.zone,
+                "exclusions_version": EXCLUSIONS_VERSION,
+            },
         )
     )
     db.commit()
@@ -437,18 +612,26 @@ def activate_policy(payload: PolicyActivateRequest, db: Session = Depends(get_db
         "premium_breakdown": policy.premium_breakdown,
         "premium_engine": premium["engine"],
         "exclusions_version": EXCLUSIONS_VERSION,
-        "exclusions_acknowledged_at": policy.exclusions_acknowledged_at.isoformat() if policy.exclusions_acknowledged_at else None,
+        "exclusions_acknowledged_at": policy.exclusions_acknowledged_at.isoformat()
+        if policy.exclusions_acknowledged_at
+        else None,
     }
 
 
 @router.post("/demo/bootstrap")
 def bootstrap_demo(payload: DemoBootstrapRequest, db: Session = Depends(get_db)):
     if payload.zone not in ZONES:
-        raise HTTPException(status_code=422, detail={"error": "UNSUPPORTED_ZONE", "message": "Unsupported zone"})
+        raise HTTPException(
+            status_code=422,
+            detail={"error": "UNSUPPORTED_ZONE", "message": "Unsupported zone"},
+        )
     if not payload.exclusions_accepted:
         raise HTTPException(
             status_code=422,
-            detail={"error": "EXCLUSIONS_NOT_ACKNOWLEDGED", "message": "Demo bootstrap requires exclusions acceptance"},
+            detail={
+                "error": "EXCLUSIONS_NOT_ACKNOWLEDGED",
+                "message": "Demo bootstrap requires exclusions acceptance",
+            },
         )
 
     rider = db.query(Rider).filter(Rider.id == payload.rider_id).first()
@@ -472,8 +655,12 @@ def bootstrap_demo(payload: DemoBootstrapRequest, db: Session = Depends(get_db))
         rider.zone = payload.zone
         rider.upi_id = payload.upi_id
 
-    policy = _ensure_rider_and_policy(db, rider_id=payload.rider_id, zone=payload.zone, exclusions_acknowledged=True)
-    premium = _predict_premium(zone=payload.zone, forecast_features={}, rider_features={}, prefer_ml=True)
+    policy = _ensure_rider_and_policy(
+        db, rider_id=payload.rider_id, zone=payload.zone, exclusions_acknowledged=True
+    )
+    premium = _predict_premium(
+        zone=payload.zone, forecast_features={}, rider_features={}, prefer_ml=True
+    )
     policy.base_premium = premium["base_premium"]
     policy.final_premium = premium["final_premium"]
     policy.premium_breakdown = premium["adjustments"]
@@ -485,7 +672,11 @@ def bootstrap_demo(payload: DemoBootstrapRequest, db: Session = Depends(get_db))
             entity_type="Demo",
             entity_id=payload.rider_id,
             action="DEMO_BOOTSTRAPPED",
-            metadata_json={"rider_id": payload.rider_id, "zone": payload.zone, "policy_id": policy.id},
+            metadata_json={
+                "rider_id": payload.rider_id,
+                "zone": payload.zone,
+                "policy_id": policy.id,
+            },
         )
     )
     db.commit()
@@ -528,9 +719,14 @@ def simulate_trigger(payload: TriggerSimulateRequest, db: Session = Depends(get_
         )
 
     if payload.zone not in ZONES:
-        raise HTTPException(status_code=422, detail={"error": "UNSUPPORTED_ZONE", "message": "Unsupported zone"})
+        raise HTTPException(
+            status_code=422,
+            detail={"error": "UNSUPPORTED_ZONE", "message": "Unsupported zone"},
+        )
 
-    weather = WeatherService.get_current_conditions(payload.zone, is_simulated=payload.is_simulated)
+    weather = WeatherService.get_current_conditions(
+        payload.zone, is_simulated=payload.is_simulated
+    )
     trigger_view = weather["trigger_view"]
 
     derived_value = payload.trigger_value
@@ -592,7 +788,11 @@ def simulate_trigger(payload: TriggerSimulateRequest, db: Session = Depends(get_
             entity_type="Simulation",
             entity_id=result["claim_id"],
             action="TRIGGER_SIMULATION_EXECUTED",
-            metadata_json={"zone": payload.zone, "trigger_type": trigger_type, "is_simulated": payload.is_simulated},
+            metadata_json={
+                "zone": payload.zone,
+                "trigger_type": trigger_type,
+                "is_simulated": payload.is_simulated,
+            },
         )
     )
     db.commit()
@@ -626,19 +826,28 @@ def get_current_policy(rider_id: str, db: Session = Depends(get_db)):
         .first()
     )
     if policy is None:
-        raise HTTPException(status_code=404, detail={"error": "POLICY_NOT_FOUND", "message": "No active policy"})
+        raise HTTPException(
+            status_code=404,
+            detail={"error": "POLICY_NOT_FOUND", "message": "No active policy"},
+        )
     return {
         "policy_id": policy.id,
         "rider_id": rider_id,
-        "week_start_date": policy.week_start_date.isoformat() if policy.week_start_date else None,
-        "week_end_date": policy.week_end_date.isoformat() if policy.week_end_date else None,
+        "week_start_date": policy.week_start_date.isoformat()
+        if policy.week_start_date
+        else None,
+        "week_end_date": policy.week_end_date.isoformat()
+        if policy.week_end_date
+        else None,
         "base_premium": policy.base_premium,
         "final_premium": policy.final_premium,
         "premium_breakdown": policy.premium_breakdown,
         "coverage_cap": policy.coverage_cap,
         "status": policy.status,
         "exclusions_version": EXCLUSIONS_VERSION,
-        "exclusions_acknowledged_at": policy.exclusions_acknowledged_at.isoformat() if policy.exclusions_acknowledged_at else None,
+        "exclusions_acknowledged_at": policy.exclusions_acknowledged_at.isoformat()
+        if policy.exclusions_acknowledged_at
+        else None,
     }
 
 
@@ -657,8 +866,12 @@ def get_policy_history(rider_id: str, db: Session = Depends(get_db)):
             {
                 "policy_id": row.id,
                 "status": row.status,
-                "week_start_date": row.week_start_date.isoformat() if row.week_start_date else None,
-                "week_end_date": row.week_end_date.isoformat() if row.week_end_date else None,
+                "week_start_date": row.week_start_date.isoformat()
+                if row.week_start_date
+                else None,
+                "week_end_date": row.week_end_date.isoformat()
+                if row.week_end_date
+                else None,
                 "base_premium": row.base_premium,
                 "final_premium": row.final_premium,
                 "coverage_cap": row.coverage_cap,
@@ -674,7 +887,12 @@ def get_policy_history(rider_id: str, db: Session = Depends(get_db)):
 
 @router.get("/claims/{rider_id}")
 def get_claims_for_rider(rider_id: str, db: Session = Depends(get_db)):
-    rows = db.query(Claim).filter(Claim.rider_id == rider_id).order_by(Claim.created_at.desc()).all()
+    rows = (
+        db.query(Claim)
+        .filter(Claim.rider_id == rider_id)
+        .order_by(Claim.created_at.desc())
+        .all()
+    )
     return {
         "rider_id": rider_id,
         "count": len(rows),
@@ -802,7 +1020,10 @@ def send_notification(payload: NotificationSendRequest, db: Session = Depends(ge
 def download_current_policy_document(rider_id: str, db: Session = Depends(get_db)):
     rider = db.query(Rider).filter(Rider.id == rider_id).first()
     if rider is None:
-        raise HTTPException(status_code=404, detail={"error": "RIDER_NOT_FOUND", "message": "Rider not found"})
+        raise HTTPException(
+            status_code=404,
+            detail={"error": "RIDER_NOT_FOUND", "message": "Rider not found"},
+        )
 
     policy = (
         db.query(Policy)
@@ -811,7 +1032,10 @@ def download_current_policy_document(rider_id: str, db: Session = Depends(get_db
         .first()
     )
     if policy is None:
-        raise HTTPException(status_code=404, detail={"error": "POLICY_NOT_FOUND", "message": "No active policy"})
+        raise HTTPException(
+            status_code=404,
+            detail={"error": "POLICY_NOT_FOUND", "message": "No active policy"},
+        )
 
     pdf_bytes = generate_policy_pdf(
         policy_data={
@@ -861,7 +1085,10 @@ def download_current_policy_document(rider_id: str, db: Session = Depends(get_db
 def download_annual_ledger_document(rider_id: str, db: Session = Depends(get_db)):
     rider = db.query(Rider).filter(Rider.id == rider_id).first()
     if rider is None:
-        raise HTTPException(status_code=404, detail={"error": "RIDER_NOT_FOUND", "message": "Rider not found"})
+        raise HTTPException(
+            status_code=404,
+            detail={"error": "RIDER_NOT_FOUND", "message": "Rider not found"},
+        )
 
     now = _now()
     one_year_ago = now - timedelta(days=365)
@@ -881,7 +1108,9 @@ def download_annual_ledger_document(rider_id: str, db: Session = Depends(get_db)
     )
 
     total_base_premium = sum(p.base_premium or 0.0 for p in policies)
-    total_claims_paid = sum(c.payout_amount or 0.0 for c in claims if c.payout_status == "credited")
+    total_claims_paid = sum(
+        c.payout_amount or 0.0 for c in claims if c.payout_status == "credited"
+    )
     net_balance = total_claims_paid - total_base_premium
     claims_count = len(claims)
 
@@ -931,7 +1160,11 @@ def download_annual_ledger_document(rider_id: str, db: Session = Depends(get_db)
             entity_type="Rider",
             entity_id=rider_id,
             action="ANNUAL_LEDGER_DOWNLOADED",
-            metadata_json={"filename": filename, "policies_count": len(policies), "claims_count": claims_count},
+            metadata_json={
+                "filename": filename,
+                "policies_count": len(policies),
+                "claims_count": claims_count,
+            },
         )
     )
     db.commit()
@@ -946,13 +1179,13 @@ def download_annual_ledger_document(rider_id: str, db: Session = Depends(get_db)
 @router.get("/admin/pool-health")
 def get_pool_health(db: Session = Depends(get_db)):
     active_policies_count = db.query(Policy).filter(Policy.status == "active").count()
-    
+
     base_pool_balance = 500000.0  # ₹5,00,000 base
     total_balance = base_pool_balance + float(active_policies_count * 30.0)
-    
+
     simulated_loss = 115000.0
     post_stress_balance = total_balance - simulated_loss
-    
+
     return {
         "active_policies": active_policies_count,
         "pool_balance": total_balance,
@@ -963,14 +1196,19 @@ def get_pool_health(db: Session = Depends(get_db)):
             "expected_claims": 50,
             "expected_payout": simulated_loss,
             "post_stress_balance": post_stress_balance,
-            "post_stress_status": "solvent" if post_stress_balance > 0 else "insolvent"
-        }
+            "post_stress_status": "solvent" if post_stress_balance > 0 else "insolvent",
+        },
     }
 
 
 @router.get("/forecast/{zone}")
-def get_7_day_forecast(zone: str):
+def get_7_day_forecast(
+    zone: str,
+    horizon_days: int = Query(default=7, ge=1, le=14),
+    db: Session = Depends(get_db),
+):
     if zone not in ZONES:
+<<<<<<< Updated upstream
         raise HTTPException(status_code=422, detail={"error": "UNSUPPORTED_ZONE", "message": "Unsupported zone"})
         
     import httpx
@@ -1023,3 +1261,15 @@ def get_7_day_forecast(zone: str):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail={"error": "WEATHER_API_ERROR", "message": str(e)})
+=======
+        raise HTTPException(
+            status_code=422,
+            detail={"error": "UNSUPPORTED_ZONE", "message": "Unsupported zone"},
+        )
+    try:
+        return generate_zone_forecast(zone=zone, db=db, horizon_days=horizon_days)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422, detail={"error": "UNSUPPORTED_ZONE", "message": str(exc)}
+        ) from exc
+>>>>>>> Stashed changes
