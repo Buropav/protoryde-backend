@@ -14,10 +14,16 @@ from app.api.schemas import (
     PayoutInitiateRequest,
 )
 from app.core.database import get_db
-from app.core.models import AuditLog, Claim, Policy
+from app.core.models import AuditLog, Claim, Policy, Rider
 from app.services.payout_service import (
     PayoutService,
     TriggerEvent as PayoutTriggerEvent,
+)
+from app.services.razorpay_service import (
+    RazorpayAPIError,
+    RazorpayConfigError,
+    create_payment_link,
+    create_upi_payout,
 )
 
 payments_router = APIRouter(prefix="/payments", tags=["payments"])
@@ -58,7 +64,25 @@ def collect_premium(payload: PaymentCollectRequest, db: Session = Depends(get_db
         )
 
     tx_id = f"txn_col_{uuid4().hex[:10]}"
-    settled_at = now_utc()
+    created_at = now_utc()
+    try:
+        payment_link = create_payment_link(
+            amount_inr=float(payload.amount),
+            rider_id=payload.rider_id,
+            policy_id=payload.policy_id,
+            upi_id=payload.upi_id,
+        )
+    except RazorpayConfigError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={"error": "RAZORPAY_NOT_CONFIGURED", "message": str(exc)},
+        ) from exc
+    except RazorpayAPIError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail={"error": "RAZORPAY_ERROR", "message": str(exc)},
+        ) from exc
+
     receipt_hash = hashlib.sha256(
         json.dumps(
             {
@@ -66,7 +90,8 @@ def collect_premium(payload: PaymentCollectRequest, db: Session = Depends(get_db
                 "rider_id": payload.rider_id,
                 "policy_id": payload.policy_id,
                 "amount": float(payload.amount),
-                "settled_at": settled_at.isoformat(),
+                "created_at": created_at.isoformat(),
+                "razorpay_link_id": payment_link.get("id"),
             },
             sort_keys=True,
         ).encode("utf-8")
@@ -76,25 +101,31 @@ def collect_premium(payload: PaymentCollectRequest, db: Session = Depends(get_db
         AuditLog(
             entity_type="Payment",
             entity_id=tx_id,
-            action="PREMIUM_COLLECTED_SETTLED",
+            action="PREMIUM_COLLECTION_LINK_CREATED",
             metadata_json={
                 "rider_id": payload.rider_id,
                 "policy_id": payload.policy_id,
                 "amount": payload.amount,
                 "upi_id": payload.upi_id,
                 "receipt_hash": receipt_hash,
-                "channel": "upi",
+                "channel": "razorpay_payment_link",
+                "razorpay_link_id": payment_link.get("id"),
+                "razorpay_short_url": payment_link.get("short_url"),
+                "razorpay_status": payment_link.get("status"),
             },
         )
     )
     db.commit()
     return {
         "transaction_id": tx_id,
-        "status": "settled",
-        "collected_at": settled_at.isoformat(),
+        "status": "pending_collection",
+        "collected_at": created_at.isoformat(),
         "amount": payload.amount,
         "receipt_hash": receipt_hash,
-        "message": f"Collected INR {payload.amount} from {payload.upi_id}",
+        "payment_link_id": payment_link.get("id"),
+        "payment_link_url": payment_link.get("short_url"),
+        "provider_status": payment_link.get("status"),
+        "message": f"Payment link created for INR {payload.amount}",
     }
 
 
@@ -130,6 +161,28 @@ def initiate_payout(payload: PayoutInitiateRequest, db: Session = Depends(get_db
             },
         )
 
+    rider = db.query(Rider).filter(Rider.id == payload.rider_id).first()
+    rider_name = rider.name if rider and rider.name else payload.rider_id
+
+    try:
+        razorpay_payout = create_upi_payout(
+            amount_inr=float(payload.amount),
+            rider_id=payload.rider_id,
+            rider_name=rider_name,
+            upi_id=payload.upi_id,
+            claim_id=payload.claim_id,
+        )
+    except RazorpayConfigError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={"error": "RAZORPAY_NOT_CONFIGURED", "message": str(exc)},
+        ) from exc
+    except RazorpayAPIError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail={"error": "RAZORPAY_ERROR", "message": str(exc)},
+        ) from exc
+
     payout_result = PayoutService.process_trigger_payout(
         rider_id=payload.rider_id,
         trigger_event=PayoutTriggerEvent(
@@ -163,6 +216,9 @@ def initiate_payout(payload: PayoutInitiateRequest, db: Session = Depends(get_db
                 "utr_number": payout_result.utr_number,
                 "smart_contract_hash": payout_result.smart_contract_hash,
                 "verification_url": payout_result.verification_url,
+                "razorpay_payout_id": razorpay_payout.get("id"),
+                "razorpay_payout_status": razorpay_payout.get("status"),
+                "razorpay_reference_id": razorpay_payout.get("reference_id"),
             },
         )
     )
@@ -175,8 +231,10 @@ def initiate_payout(payload: PayoutInitiateRequest, db: Session = Depends(get_db
         "utr_number": payout_result.utr_number,
         "smart_contract_hash": payout_result.smart_contract_hash,
         "verification_url": payout_result.verification_url,
+        "provider_payout_id": razorpay_payout.get("id"),
+        "provider_status": razorpay_payout.get("status"),
         "stp_latency_ms": max(1, int(payout_result.processed_in_seconds * 1000)),
-        "message": f"Settled INR {payload.amount} transfer to {payload.upi_id}",
+        "message": f"Payout initiated for INR {payload.amount} to {payload.upi_id}",
     }
 
 
