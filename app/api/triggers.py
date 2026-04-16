@@ -998,10 +998,29 @@ def initiate_payout(payload: PayoutInitiateRequest, db: Session = Depends(get_db
     }
 
 
+import os
+import requests
+
 @router.post("/notifications/send")
 def send_notification(payload: NotificationSendRequest, db: Session = Depends(get_db)):
-    """Mock SMS notification. Represents the 'relief' moment in the story."""
+    """Live Telegram push notification. Represents the 'relief' moment in the story."""
     msg_id = f"msg_{uuid4().hex[:10]}"
+    
+    bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
+    chat_id = os.getenv("TELEGRAM_CHAT_ID")
+    
+    if bot_token and chat_id:
+        try:
+            url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+            telegram_payload = {
+                "chat_id": chat_id,
+                "text": f"🚨 *ProtoRyde Instant Payout* 🚨\n\n*Rider ID*: `{payload.rider_id}`\n*Status*: Paid ✅\n\n*Message*: {payload.message}",
+                "parse_mode": "Markdown"
+            }
+            requests.post(url, json=telegram_payload, timeout=5)
+        except Exception as e:
+            print(f"Telegram notification failed: {e}")
+
     db.add(
         AuditLog(
             entity_type="Notification",
