@@ -269,6 +269,38 @@ def get_model_status(db: Session = Depends(get_db)):
     return status
 
 
+@router.post("/demo/simulate-trigger")
+def simulate_trigger_demo_alias(
+    payload: TriggerSimulateRequest, db: Session = Depends(get_db)
+):
+    result = simulate_trigger(payload, db)
+    claim_preview = (result.get("claims_preview") or [{}])[0]
+    trigger_event = result.get("trigger_event") or {}
+    payout_result = PayoutService.process_trigger_payout(
+        rider_id=payload.rider_id,
+        trigger_event=PayoutTriggerEvent(
+            trigger_type=result.get("trigger_type", payload.trigger_type),
+            value=float(trigger_event.get("value", 0.0)),
+            threshold=float(trigger_event.get("threshold", 0.0)),
+            breached=bool(trigger_event.get("breached", False)),
+        ),
+        fraud_result={
+            "claim_id": claim_preview.get("claim_id", ""),
+            "recommended_payout": float(claim_preview.get("recommended_payout", 0.0)),
+        },
+        db=db,
+    )
+    return {
+        "claim_id": payout_result.claim_id,
+        "payout_amount": payout_result.payout_amount,
+        "utr_number": payout_result.utr_number,
+        "processed_in_seconds": payout_result.processed_in_seconds,
+        "smart_contract_hash": getattr(payout_result, "smart_contract_hash", "N/A"),
+        "verification_url": getattr(payout_result, "verification_url", ""),
+        "simulation": result,
+    }
+
+
 @router.post("/admin/model-retrain")
 def retrain_models(db: Session = Depends(get_db)):
     premium_path = train_and_save_model(db=db)
