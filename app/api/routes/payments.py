@@ -266,6 +266,7 @@ def send_notification(payload: NotificationSendRequest, db: Session = Depends(ge
                 "rider_id": payload.rider_id,
                 "phone": payload.phone,
                 "type": payload.type,
+                "message": payload.message,
             },
         )
     )
@@ -275,4 +276,34 @@ def send_notification(payload: NotificationSendRequest, db: Session = Depends(ge
         "status": "delivered",
         "delivered_at": now_utc().isoformat(),
         "preview": payload.message,
+    }
+
+
+@notifications_router.get("/{rider_id}")
+def get_notifications(rider_id: str, db: Session = Depends(get_db)):
+    # Keep this filter backend-agnostic across SQLite/Postgres JSON behavior.
+    logs = (
+        db.query(AuditLog)
+        .filter(AuditLog.entity_type == "Notification")
+        .order_by(AuditLog.created_at.desc())
+        .limit(200)
+        .all()
+    )
+    rider_logs = [
+        log
+        for log in logs
+        if isinstance(log.metadata_json, dict)
+        and log.metadata_json.get("rider_id") == rider_id
+    ][:20]
+    return {
+        "notifications": [
+            {
+                "id": log.id,
+                "title": log.action.replace("_", " ").title(),
+                "description": log.metadata_json.get("message", "System notification"),
+                "time": log.created_at.isoformat(),
+                "type": log.metadata_json.get("type", "INFO")
+            }
+            for log in rider_logs
+        ]
     }

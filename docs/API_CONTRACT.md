@@ -65,12 +65,23 @@ This document is the integration contract for the frontend.
 ### 8) Rider Claims
 - `GET /claims/{rider_id}`
 
-### 9) Admin Claims
-- `GET /claims?zone=&trigger_type=&is_simulated=&limit=`
+### 9) Admin Management (Phase 3)
+- `GET /admin/metrics`: returns `{active_policies, total_premiums, total_claims_paid}`
+- `GET /admin/claims_map`: returns `{claims: [{id, latitude, longitude, payout_amount, ...}]}`
+- `GET /admin/fraud_flags`: returns `{flags: [{claim_id, rider_id, fraud_layers, ...}]}`
+- `GET /admin/predictions`: same as `/forecast/HSR Layout`
+
+### 10) Policy Upgrades (Phase 3)
+- `POST /policy/{id}/upgrade`: Boosts premium by ₹25, caps payout at ₹2800
+
+### 11) Rider Calendar (Phase 3)
+- `GET /rider/{id}/calendar`: 7-day unified earnings timeline
 
 ## Supporting Endpoints
 - `GET /exclusions`
 - `GET /premium/model-status`
+- `GET /policy/eligibility?zone=...`
+- `GET /enrollment/eligibility?zone=...`
 - `GET /weather/current/{zone}?is_simulated=true|false`
 - `GET /weather/warnings/{zone}?is_simulated=true|false`
 - `GET /mock/delhivery/{zone}/{date}`

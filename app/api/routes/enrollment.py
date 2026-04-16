@@ -10,6 +10,7 @@ enrollment_router = APIRouter(prefix="/enrollment", tags=["enrollment"])
 
 
 @policy_router.get("/eligibility")
+@enrollment_router.get("/eligibility")
 def get_policy_eligibility(zone: str):
     if zone not in ZONES:
         raise HTTPException(

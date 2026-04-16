@@ -33,11 +33,16 @@ uvicorn main:app --reload --port 8000
 - Retrain all models immediately: `POST /api/admin/model-retrain`
 
 ## Demo-Critical Endpoints
-- `POST /api/demo/bootstrap`
-- `POST /api/triggers/simulate`
-- `GET /api/claims/{rider_id}`
-- `GET /api/policies/{rider_id}/current`
-- `GET /api/policies/{rider_id}/current/document`
+- `POST /api/demo/bootstrap`: demo setup
+- `POST /api/triggers/simulate`: claim simulation
+- `GET /api/claims/{rider_id}`: rider claims history
+- `GET /api/policies/{rider_id}/current`: policy status
+- `POST /api/policy/{id}/upgrade`: Enhanced Coverage upsell (Phase 3)
+- `GET /api/rider/{id}/calendar`: Earnings timeline (Phase 3)
+- `GET /api/admin/metrics`: Platform health KPIs (Phase 3)
+- `GET /api/admin/claims_map`: Geolocation visualization (Phase 3)
+- `GET /api/admin/fraud_flags`: Suspicious claim review (Phase 3)
+- `GET /api/admin/predictions`: Global risk forecasting (Phase 3)
 
 ## Reliability Tests
 ```bash
