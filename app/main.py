@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import logging
 import os
-from app.api import triggers
+from app.api import api_router
 from app.core.scheduler import start_scheduler
 from app.core.database import init_db
 
@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 import threading
 
 _DB_INIT_TIMEOUT_S = 30
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -34,9 +35,9 @@ async def lifespan(app: FastAPI):
     if scheduler is not None:
         scheduler.shutdown()
 
+
 app = FastAPI(
-    title="ProtoRyde Phase 2 - Trigger & Simulation Backend",
-    lifespan=lifespan
+    title="ProtoRyde Phase 2 - Trigger & Simulation Backend", lifespan=lifespan
 )
 
 _origins_raw = os.getenv("ALLOWED_ORIGINS", "").strip()
@@ -48,7 +49,9 @@ else:
     _allow_origins = ["*"]
     _allow_credentials = False
     if _origins_raw != "*":
-        logger.warning("ALLOWED_ORIGINS not set — CORS is wide open. Set it in production.")
+        logger.warning(
+            "ALLOWED_ORIGINS not set — CORS is wide open. Set it in production."
+        )
 
 app.add_middleware(
     CORSMiddleware,
@@ -58,13 +61,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(triggers.router)
+app.include_router(api_router)
+
 
 @app.get("/health")
 def health_check():
     return {"status": "ok", "service": "ProtoRyde FastAPI Server"}
 
+
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)
 
+    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)
