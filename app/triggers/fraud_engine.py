@@ -145,6 +145,7 @@ class FraudEngine:
         rider_id: str,
         avg_daily_earnings: float = 1050.0,
         duration_hours: float = 9.0,
+        coverage_tier: str = "STANDARD",
         is_simulated: bool = False,
         latitude: Optional[float] = None,
         longitude: Optional[float] = None,
@@ -235,8 +236,10 @@ class FraudEngine:
 
         fraud_check_passed = all(item["passed"] for item in fraud_layers)
         raw_payout = (avg_daily_earnings * (duration_hours / 9.0)) * 0.80
+        
+        coverage_cap = 2800.0 if coverage_tier == "ENHANCED" else 2300.0
         recommended_payout = (
-            round(min(raw_payout, 2300.0), 2) if fraud_check_passed else 0.0
+            round(min(raw_payout, coverage_cap), 2) if fraud_check_passed else 0.0
         )
 
         result = {

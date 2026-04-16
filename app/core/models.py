@@ -42,6 +42,7 @@ class Policy(Base):
     base_premium = Column(Float)
     final_premium = Column(Float)
     premium_breakdown = Column(JSON)  # Stores SHAP values block
+    coverage_tier = Column(String, default="STANDARD")
     coverage_cap = Column(Float)
     status = Column(String)  # active, expired, cancelled
     exclusions_acknowledged_at = Column(DateTime)

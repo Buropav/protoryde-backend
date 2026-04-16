@@ -56,7 +56,7 @@ def _daily_claim_probability(zone: str, db: Session, days: int = 120) -> pd.Data
         .filter(
             Claim.zone == zone,
             Claim.created_at >= since,
-            Claim.payout_status == "credited",
+            Claim.payout_status == "PAID",
         )
         .group_by(func.date(Claim.created_at))
         .all()

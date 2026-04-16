@@ -50,7 +50,7 @@ def poll_weather_and_auto_trigger():
                         fraud_check_passed=res["fraud_check_passed"],
                         fraud_layers=res["fraud_layers"],
                         payout_amount=float(res["recommended_payout"]),
-                        payout_status="credited"
+                        payout_status="PAID"
                         if res["recommended_payout"] > 0
                         else "rejected",
                         payout_initiated_at=now

@@ -177,6 +177,7 @@ def _ensure_rider_and_policy(
             base_premium=premium["base_premium"],
             final_premium=premium["final_premium"],
             premium_breakdown=premium["adjustments"],
+            coverage_tier="STANDARD",
             coverage_cap=2300.0,
             status="active",
             exclusions_acknowledged_at=now if exclusions_acknowledged else None,
@@ -452,17 +453,25 @@ def get_weather_warnings(zone: str, is_simulated: bool = Query(False)):
 @router.get("/mock/delhivery/{zone}/{date}")
 def get_delhivery_metrics(zone: str, date: str):
     import pandas as pd
+
     try:
         df = pd.read_csv(os.path.join(DATA_DIR, "delhivery_dataset.csv"))
-        zone_mask = df['source_name'].str.contains(zone, case=False, na=False) | df['destination_name'].str.contains(zone, case=False, na=False)
+        zone_mask = df["source_name"].str.contains(zone, case=False, na=False) | df[
+            "destination_name"
+        ].str.contains(zone, case=False, na=False)
         zone_df = df[zone_mask]
-        if len(zone_df) == 0: zone_df = df
-        
+        if len(zone_df) == 0:
+            zone_df = df
+
         total_orders = len(zone_df)
-        delayed = zone_df[zone_df['actual_time'] > zone_df['osrm_time'] * 1.5]
+        delayed = zone_df[zone_df["actual_time"] > zone_df["osrm_time"] * 1.5]
         cancelled_orders = len(delayed)
-        cancellation_rate_pct = round((cancelled_orders / total_orders) * 100, 2) if total_orders > 0 else 0.0
-        
+        cancellation_rate_pct = (
+            round((cancelled_orders / total_orders) * 100, 2)
+            if total_orders > 0
+            else 0.0
+        )
+
         return {
             "zone": zone,
             "date": date,
@@ -473,7 +482,13 @@ def get_delhivery_metrics(zone: str, date: str):
             "fixture_version": FIXTURE_VERSION,
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail={"error": "DATASET_ERROR", "message": f"Failed to load real logistics dataset: {str(e)}"})
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": "DATASET_ERROR",
+                "message": f"Failed to load real logistics dataset: {str(e)}",
+            },
+        )
 
 
 @router.get("/mock/branches/{zone}")
@@ -533,14 +548,21 @@ def get_policy_eligibility(zone: str):
 def get_enrollment_lockout_status(zone: str):
     """Check whether enrollment is currently blocked for a zone due to active weather alerts."""
     if zone not in ZONES:
-        raise HTTPException(status_code=422, detail={"error": "UNSUPPORTED_ZONE", "message": "Unsupported zone"})
+        raise HTTPException(
+            status_code=422,
+            detail={"error": "UNSUPPORTED_ZONE", "message": "Unsupported zone"},
+        )
     warnings = _check_enrollment_lockout(zone)
     return {
         "zone": zone,
         "lockout_active": len(warnings) > 0,
         "active_warnings": warnings,
-        "message": "Enrollment blocked — active weather advisory" if warnings else "Enrollment open",
+        "message": "Enrollment blocked — active weather advisory"
+        if warnings
+        else "Enrollment open",
     }
+
+
 @router.post("/policies/activate")
 def activate_policy(payload: PolicyActivateRequest, db: Session = Depends(get_db)):
     if payload.zone not in ZONES:
@@ -753,6 +775,7 @@ def simulate_trigger(payload: TriggerSimulateRequest, db: Session = Depends(get_
         rider_id=payload.rider_id,
         avg_daily_earnings=payload.avg_daily_earnings,
         duration_hours=payload.duration_hours,
+        coverage_tier=policy.coverage_tier,
         is_simulated=payload.is_simulated,
         latitude=payload.latitude,
         longitude=payload.longitude,
@@ -771,7 +794,7 @@ def simulate_trigger(payload: TriggerSimulateRequest, db: Session = Depends(get_
         fraud_check_passed=result["fraud_check_passed"],
         fraud_layers=result["fraud_layers"],
         payout_amount=float(result["recommended_payout"]),
-        payout_status="credited" if result["recommended_payout"] > 0 else "rejected",
+        payout_status="PAID" if result["recommended_payout"] > 0 else "rejected",
         payout_initiated_at=_now() if result["recommended_payout"] > 0 else None,
         delhivery_cancellation_rate=next(
             (
@@ -959,7 +982,12 @@ def collect_premium(payload: PaymentCollectRequest, db: Session = Depends(get_db
             entity_type="Payment",
             entity_id=tx_id,
             action="PREMIUM_COLLECTED",
-            metadata_json={"rider_id": payload.rider_id, "policy_id": payload.policy_id, "amount": payload.amount, "upi_id": payload.upi_id},
+            metadata_json={
+                "rider_id": payload.rider_id,
+                "policy_id": payload.policy_id,
+                "amount": payload.amount,
+                "upi_id": payload.upi_id,
+            },
         )
     )
     db.commit()
@@ -981,7 +1009,12 @@ def initiate_payout(payload: PayoutInitiateRequest, db: Session = Depends(get_db
             entity_type="Payout",
             entity_id=tx_id,
             action="PAYOUT_INITIATED",
-            metadata_json={"claim_id": payload.claim_id, "rider_id": payload.rider_id, "amount": payload.amount, "upi_id": payload.upi_id},
+            metadata_json={
+                "claim_id": payload.claim_id,
+                "rider_id": payload.rider_id,
+                "amount": payload.amount,
+                "upi_id": payload.upi_id,
+            },
         )
     )
     db.commit()
@@ -991,7 +1024,7 @@ def initiate_payout(payload: PayoutInitiateRequest, db: Session = Depends(get_db
         "processed_at": _now().isoformat(),
         "amount": payload.amount,
         "message": f"Successfully initiated INR {payload.amount} transfer to {payload.upi_id}",
-        "stp_latency_ms": 142, # Mock latency for storytelling
+        "stp_latency_ms": 142,  # Mock latency for storytelling
     }
 
 
@@ -1004,7 +1037,11 @@ def send_notification(payload: NotificationSendRequest, db: Session = Depends(ge
             entity_type="Notification",
             entity_id=msg_id,
             action="NOTIFICATION_SENT",
-            metadata_json={"rider_id": payload.rider_id, "phone": payload.phone, "type": payload.type},
+            metadata_json={
+                "rider_id": payload.rider_id,
+                "phone": payload.phone,
+                "type": payload.type,
+            },
         )
     )
     db.commit()
@@ -1109,7 +1146,7 @@ def download_annual_ledger_document(rider_id: str, db: Session = Depends(get_db)
 
     total_base_premium = sum(p.base_premium or 0.0 for p in policies)
     total_claims_paid = sum(
-        c.payout_amount or 0.0 for c in claims if c.payout_status == "credited"
+        c.payout_amount or 0.0 for c in claims if c.payout_status == "PAID"
     )
     net_balance = total_claims_paid - total_base_premium
     claims_count = len(claims)
@@ -1208,60 +1245,6 @@ def get_7_day_forecast(
     db: Session = Depends(get_db),
 ):
     if zone not in ZONES:
-<<<<<<< Updated upstream
-        raise HTTPException(status_code=422, detail={"error": "UNSUPPORTED_ZONE", "message": "Unsupported zone"})
-        
-    import httpx
-    coords = ZONES[zone]
-    lat, lon = coords["lat"], coords["lon"]
-    
-    try:
-        res = httpx.get(
-            "https://api.open-meteo.com/v1/forecast",
-            params={
-                "latitude": lat,
-                "longitude": lon,
-                "daily": "precipitation_sum,temperature_2m_max",
-                "timezone": "auto",
-            },
-            timeout=5.0
-        )
-        res.raise_for_status()
-        data = res.json().get("daily", {})
-        
-        forecasts = []
-        for i in range(len(data.get("time", []))):
-            date_str = data["time"][i]
-            rain = float(data["precipitation_sum"][i] or 0.0)
-            temp = float(data["temperature_2m_max"][i] or 0.0)
-            
-            if rain >= 30.0:
-                prob_payout = 0.95
-            elif rain >= 15.0:
-                prob_payout = 0.60
-            elif temp >= 40.0:
-                prob_payout = 0.80
-            else:
-                prob_payout = 0.05 + (rain / 100.0)
-                
-            prob_payout = min(round(prob_payout, 2), 1.0)
-            expected_loss = round(prob_payout * 2300.0, 2)
-            
-            forecasts.append({
-                "date": date_str,
-                "prob_payout": prob_payout,
-                "expected_loss": expected_loss,
-                "metrics": {"rain_mm": rain, "max_temp_c": temp}
-            })
-            
-        return {
-            "zone": zone,
-            "forecast": forecasts[:7],
-            "model": "open_meteo_live"
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail={"error": "WEATHER_API_ERROR", "message": str(e)})
-=======
         raise HTTPException(
             status_code=422,
             detail={"error": "UNSUPPORTED_ZONE", "message": "Unsupported zone"},
@@ -1272,4 +1255,149 @@ def get_7_day_forecast(
         raise HTTPException(
             status_code=422, detail={"error": "UNSUPPORTED_ZONE", "message": str(exc)}
         ) from exc
->>>>>>> Stashed changes
+
+
+@router.get("/admin/metrics")
+def get_admin_metrics(db: Session = Depends(get_db)):
+    from sqlalchemy.sql import func
+
+    now = datetime.now(timezone.utc)
+    active_policies = (
+        db.query(Policy)
+        .filter(Policy.status == "active", Policy.week_end_date >= now)
+        .count()
+    )
+    total_premiums = db.query(func.sum(Policy.final_premium)).scalar() or 0.0
+    total_claims_paid = (
+        db.query(func.sum(Claim.payout_amount))
+        .filter(Claim.payout_status == "PAID")
+        .scalar()
+        or 0.0
+    )
+
+    return {
+        "active_policies": active_policies,
+        "total_premiums": round(total_premiums, 2),
+        "total_claims_paid": round(total_claims_paid, 2),
+    }
+
+
+@router.get("/admin/claims_map")
+def get_admin_claims_map(db: Session = Depends(get_db)):
+    claims = db.query(
+        Claim.id, Claim.zone, Claim.payout_amount, Claim.fraud_check_passed
+    ).all()
+    map_data = []
+
+    for c in claims:
+        zone_info = ZONES.get(c.zone, {"lat": 12.9716, "lon": 77.5946})
+        map_data.append(
+            {
+                "id": c.id,
+                "zone": c.zone,
+                "latitude": zone_info["lat"],
+                "longitude": zone_info["lon"],
+                "payout_amount": c.payout_amount,
+                "fraud_check_passed": c.fraud_check_passed,
+            }
+        )
+    return {"claims": map_data}
+
+
+@router.get("/admin/fraud_flags")
+def get_admin_fraud_flags(db: Session = Depends(get_db)):
+    flags = db.query(Claim).filter(Claim.fraud_check_passed == False).all()
+    out = []
+    for f in flags:
+        out.append(
+            {
+                "claim_id": f.id,
+                "rider_id": f.rider_id,
+                "zone": f.zone,
+                "trigger_type": f.trigger_type,
+                "created_at": f.created_at.isoformat(),
+                "fraud_layers": f.fraud_layers,
+            }
+        )
+    return {"flags": out}
+
+
+@router.get("/admin/predictions")
+def get_admin_predictions(db: Session = Depends(get_db)):
+    # Returns 7-day predicted volume for a standard zone (HSR Layout)
+    return generate_zone_forecast(zone="HSR Layout", db=db, horizon_days=7)
+
+
+@router.post("/policy/{id}/upgrade")
+def upgrade_policy(id: str, db: Session = Depends(get_db)):
+    policy = db.query(Policy).filter(Policy.id == id).first()
+    if not policy:
+        raise HTTPException(status_code=404, detail="Policy not found")
+
+    if getattr(policy, "coverage_tier", "STANDARD") == "ENHANCED":
+        raise HTTPException(
+            status_code=400, detail="Policy is already upgraded to ENHANCED tier"
+        )
+
+    policy.coverage_tier = "ENHANCED"
+    policy.final_premium += 25.0
+    policy.coverage_cap = 2800.0
+
+    db.commit()
+    db.refresh(policy)
+
+    return {
+        "status": "upgraded",
+        "policy_id": policy.id,
+        "coverage_tier": policy.coverage_tier,
+        "final_premium": policy.final_premium,
+        "coverage_cap": policy.coverage_cap,
+    }
+
+
+@router.get("/rider/{id}/calendar")
+def get_rider_calendar(id: str, db: Session = Depends(get_db)):
+    import random
+
+    now = datetime.now(timezone.utc)
+    calendar = []
+
+    # Get all claims from last 7 days
+    seven_days_ago = now - timedelta(days=7)
+    claims = (
+        db.query(Claim)
+        .filter(
+            Claim.rider_id == id,
+            Claim.created_at >= seven_days_ago,
+            Claim.payout_status == "PAID",
+        )
+        .all()
+    )
+
+    claims_by_date = {}
+    for c in claims:
+        d = c.created_at.date().isoformat()
+        claims_by_date[d] = claims_by_date.get(d, 0.0) + c.payout_amount
+
+    random.seed(id)  # Consistent per rider
+
+    for i in range(7):
+        target_date = (now - timedelta(days=i)).date()
+        date_str = target_date.isoformat()
+
+        # Delhivery mock earnings between 800 and 1200
+        delhivery_earnings = round(random.uniform(800.0, 1200.0), 2)
+
+        claim_payout = claims_by_date.get(date_str, 0.0)
+
+        calendar.append(
+            {
+                "date": date_str,
+                "delhivery_earnings": delhivery_earnings,
+                "claim_payout": claim_payout,
+                "total_earnings": round(delhivery_earnings + claim_payout, 2),
+                "protected": claim_payout > 0.0,
+            }
+        )
+
+    return {"rider_id": id, "calendar": calendar}
