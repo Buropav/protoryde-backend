@@ -254,8 +254,8 @@ def send_notification(payload: NotificationSendRequest, db: Session = Depends(ge
                 "parse_mode": "Markdown",
             }
             requests.post(url, json=telegram_payload, timeout=5)
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"Failed to send telegram notification: {e}")
 
     db.add(
         AuditLog(
