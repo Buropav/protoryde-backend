@@ -44,7 +44,7 @@ def load_delhivery_data(seed: int = 42) -> pd.DataFrame:
     try:
         month = pd.to_datetime(df['trip_creation_time']).dt.month
         season_risk = np.where((month >= 6) & (month <= 9), 1.5, 0.5)
-    except:
+    except Exception:
         month = rng.integers(1, 13, n_samples).astype(float)
         season_risk = np.where((month >= 6) & (month <= 9), 1.5, 0.5)
     

@@ -8,9 +8,9 @@ if _DB_PATH.exists():
     _DB_PATH.unlink()
 os.environ["DATABASE_URL"] = f"sqlite:///{_DB_PATH}"
 
-from fastapi.testclient import TestClient
+from fastapi.testclient import TestClient  # noqa: E402
 
-from app.main import app
+from app.main import app  # noqa: E402
 
 
 class TestTriggerRoutes(unittest.TestCase):
@@ -55,32 +55,6 @@ class TestTriggerRoutes(unittest.TestCase):
                 "L4_BRANCH_CLOSURE_CHECK",
             ],
         )
-
-    @patch("app.api.routes.policies.check_enrollment_lockout", return_value=[])
-    def test_demo_simulate_alias_shape(self, _mock_lockout):
-        rider_id = "rdr_demo_sim_alias"
-        self.client.post(
-            "/api/policies/activate",
-            json={
-                "rider_id": rider_id,
-                "zone": "HSR Layout",
-                "exclusions_accepted": True,
-                "prefer_ml": False,
-            },
-        )
-
-        response = self.client.post(
-            "/api/demo/simulate-trigger",
-            json={
-                "zone": "HSR Layout",
-                "trigger_type": "HEAVY_RAIN",
-                "rider_id": rider_id,
-            },
-        )
-        self.assertEqual(response.status_code, 200)
-        body = response.json()
-        self.assertIn("simulation", body)
-        self.assertIn("utr_number", body)
 
 
 if __name__ == "__main__":

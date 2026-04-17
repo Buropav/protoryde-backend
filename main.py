@@ -4,7 +4,7 @@ Run:
   uvicorn main:app --reload --port 8000
 """
 
-from app.main import app
+from app.main import app  # noqa: F401
 
 if __name__ == "__main__":
     import uvicorn

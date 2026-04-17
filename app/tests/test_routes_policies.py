@@ -8,9 +8,9 @@ if _DB_PATH.exists():
     _DB_PATH.unlink()
 os.environ["DATABASE_URL"] = f"sqlite:///{_DB_PATH}"
 
-from fastapi.testclient import TestClient
+from fastapi.testclient import TestClient  # noqa: E402
 
-from app.main import app
+from app.main import app  # noqa: E402
 
 
 class TestPolicyRoutes(unittest.TestCase):

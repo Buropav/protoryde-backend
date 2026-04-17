@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -289,7 +289,7 @@ def get_admin_claims_map(db: Session = Depends(get_db)):
 
 @admin_router.get("/fraud_flags")
 def get_admin_fraud_flags(db: Session = Depends(get_db)):
-    flags = db.query(Claim).filter(Claim.fraud_check_passed == False).all()
+    flags = db.query(Claim).filter(Claim.fraud_check_passed == False).all()  # noqa: E712
     out = []
     for flag in flags:
         out.append(

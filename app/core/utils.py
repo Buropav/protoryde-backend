@@ -1,7 +1,6 @@
 """Shared utilities for the ProtoRyde backend."""
 
 import json
-import os
 from typing import Any, Dict
 
 
