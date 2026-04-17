@@ -1,24 +1,21 @@
 from datetime import timedelta
 from io import BytesIO
-from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
+from app.services.policy_service import activate_rider_policy, bootstrap_demo_rider
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.api.constants import EXCLUSIONS, EXCLUSIONS_VERSION
 from app.api.dependencies import (
-    check_enrollment_lockout,
-    ensure_rider_and_policy,
     now_utc,
-    predict_premium,
 )
 from app.api.schemas import DemoBootstrapRequest, PolicyActivateRequest
 from app.api.routes.enrollment import get_policy_eligibility
 from app.core.database import get_db
 from app.core.models import AuditLog, Claim, Policy, Rider
 from app.services.policy_pdf import generate_ledger_pdf, generate_policy_pdf
-from app.triggers.weather_service import FIXTURE_VERSION, ZONES
+from app.triggers.weather_service import FIXTURE_VERSION
 
 policies_router = APIRouter(prefix="/policies", tags=["policies"])
 policy_router = APIRouter(prefix="/policy", tags=["policies"])
@@ -27,108 +24,15 @@ demo_router = APIRouter(prefix="/demo", tags=["policies"])
 
 @policies_router.post("/activate")
 def activate_policy(payload: PolicyActivateRequest, db: Session = Depends(get_db)):
-    if payload.zone not in ZONES:
-        raise HTTPException(
-            status_code=422,
-            detail={"error": "UNSUPPORTED_ZONE", "message": "Unsupported zone"},
-        )
-    if not payload.exclusions_accepted:
-        raise HTTPException(
-            status_code=422,
-            detail={
-                "error": "EXCLUSIONS_NOT_ACKNOWLEDGED",
-                "message": "Policy activation requires exclusions acceptance",
-            },
-        )
-
-    active_warnings = check_enrollment_lockout(payload.zone)
-    if active_warnings:
-        raise HTTPException(
-            status_code=422,
-            detail={
-                "error": "ENROLLMENT_LOCKOUT",
-                "message": "Cannot activate policy during an active weather advisory. Try again when conditions normalize.",
-                "active_warnings": active_warnings,
-            },
-        )
-
-    policy = ensure_rider_and_policy(
-        db, rider_id=payload.rider_id, zone=payload.zone, exclusions_acknowledged=True
-    )
-    premium = predict_premium(
-        zone=payload.zone,
-        forecast_features=payload.forecast_features,
-        rider_features=payload.rider_features,
-        prefer_ml=payload.prefer_ml,
-        explicit_zone_risk=payload.zone_risk_score,
-        weather_severity=payload.weather_severity,
-        claim_history=payload.claim_history,
-    )
-
-    policy.base_premium = premium["base_premium"]
-    policy.final_premium = premium["final_premium"]
-    policy.premium_breakdown = premium["adjustments"]
-    policy.exclusions_acknowledged_at = now_utc()
-    policy.status = "active"
-
-    db.add(
-        AuditLog(
-            entity_type="Policy",
-            entity_id=policy.id,
-            action="POLICY_ACTIVATED",
-            metadata_json={
-                "rider_id": payload.rider_id,
-                "zone": payload.zone,
-                "exclusions_version": EXCLUSIONS_VERSION,
-            },
-        )
-    )
-    db.commit()
-    db.refresh(policy)
-
-    return {
-        "policy_id": policy.id,
-        "rider_id": payload.rider_id,
-        "zone": payload.zone,
-        "status": policy.status,
-        "base_premium": policy.base_premium,
-        "final_premium": policy.final_premium,
-        "premium_breakdown": policy.premium_breakdown,
-        "premium_engine": premium["engine"],
-        "exclusions_version": EXCLUSIONS_VERSION,
-        "exclusions_acknowledged_at": policy.exclusions_acknowledged_at.isoformat()
-        if policy.exclusions_acknowledged_at
-        else None,
-    }
+    return activate_rider_policy(db, payload)
 
 
 @demo_router.post("/bootstrap")
 def bootstrap_demo_alias(payload: DemoBootstrapRequest, db: Session = Depends(get_db)):
-    rider = db.query(Rider).filter(Rider.id == payload.rider_id).first()
-    rider_name = payload.rider_name or "ProtoRyde Rider"
-    rider_upi = payload.upi_id or "rider@upi"
+    rider = bootstrap_demo_rider(db, payload)
 
-    if rider is None:
-        rider = Rider(
-            id=payload.rider_id,
-            name=rider_name,
-            phone=f"9{uuid4().hex[:9]}",
-            delhivery_partner_id=f"DEL-{uuid4().hex[:8].upper()}",
-            zone=payload.zone,
-            upi_id=rider_upi,
-            avg_daily_earnings=1050.0,
-            claim_rate_12wk=0.6,
-            fraud_flag_count=0,
-            kyc_verified=True,
-        )
-        db.add(rider)
-        db.flush()
-    else:
-        rider.name = rider_name
-        rider.zone = payload.zone
-        rider.upi_id = rider_upi
-
-    policy_response = activate_policy(
+    policy_response = activate_rider_policy(
+        db,
         PolicyActivateRequest(
             rider_id=payload.rider_id,
             zone=payload.zone,
@@ -140,7 +44,6 @@ def bootstrap_demo_alias(payload: DemoBootstrapRequest, db: Session = Depends(ge
             claim_history=payload.claim_history,
             zone_risk_score=payload.zone_risk_score,
         ),
-        db,
     )
 
     db.refresh(rider)

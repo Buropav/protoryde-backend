@@ -23,7 +23,7 @@ class TestPolicyRoutes(unittest.TestCase):
     def tearDownClass(cls):
         cls._client_ctx.__exit__(None, None, None)
 
-    @patch("app.api.routes.policies.check_enrollment_lockout", return_value=[])
+    @patch("app.services.policy_service.check_enrollment_lockout", return_value=[])
     def test_activate_policy_success(self, _mock_lockout):
         payload = {
             "rider_id": "rdr_policy_route",
@@ -49,7 +49,7 @@ class TestPolicyRoutes(unittest.TestCase):
         body = response.json()
         self.assertEqual(body["detail"]["error"], "EXCLUSIONS_NOT_ACKNOWLEDGED")
 
-    @patch("app.api.routes.policies.check_enrollment_lockout", return_value=[])
+    @patch("app.services.policy_service.check_enrollment_lockout", return_value=[])
     def test_policy_document_download(self, _mock_lockout):
         rider_id = "rdr_policy_pdf"
         activate_payload = {

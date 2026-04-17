@@ -23,7 +23,7 @@ class TestTriggerRoutes(unittest.TestCase):
     def tearDownClass(cls):
         cls._client_ctx.__exit__(None, None, None)
 
-    @patch("app.api.routes.policies.check_enrollment_lockout", return_value=[])
+    @patch("app.services.policy_service.check_enrollment_lockout", return_value=[])
     def test_simulate_trigger_contract_shape(self, _mock_lockout):
         rider_id = "rdr_triggers_route"
         activate_payload = {
