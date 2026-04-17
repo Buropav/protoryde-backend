@@ -3,7 +3,7 @@ import os
 import time
 
 from dotenv import load_dotenv
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 load_dotenv()
@@ -19,13 +19,26 @@ def _normalize_database_url(url: str) -> str:
 
 # Use DATABASE_URL when provided. Fall back to local SQLite to keep demo setup reliable.
 SQLALCHEMY_DATABASE_URL = _normalize_database_url(os.getenv("DATABASE_URL", "sqlite:///./protoryde.db"))
-CONNECT_ARGS = {"check_same_thread": False} if SQLALCHEMY_DATABASE_URL.startswith("sqlite") else {}
+CONNECT_ARGS = (
+    {"check_same_thread": False, "timeout": 30}
+    if SQLALCHEMY_DATABASE_URL.startswith("sqlite")
+    else {}
+)
 
 engine = create_engine(
     SQLALCHEMY_DATABASE_URL,
     connect_args=CONNECT_ARGS,
     pool_pre_ping=True,  # Auto-reconnect stale/dead connections
 )
+
+if SQLALCHEMY_DATABASE_URL.startswith("sqlite"):
+    @event.listens_for(engine, "connect")
+    def _sqlite_pragmas(dbapi_connection, _connection_record):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL;")
+        cursor.execute("PRAGMA busy_timeout = 30000;")
+        cursor.close()
+
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 

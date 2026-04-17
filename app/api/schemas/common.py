@@ -1,10 +1,26 @@
 from typing import Any, Dict, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints
+from typing_extensions import Annotated
+
+RiderId = Annotated[
+    str,
+    StringConstraints(
+        strip_whitespace=True, min_length=3, max_length=64, pattern=r"^[A-Za-z0-9_.-]+$"
+    ),
+]
+ZoneName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=2, max_length=80)]
+UpiId = Annotated[
+    str,
+    StringConstraints(
+        strip_whitespace=True, min_length=5, max_length=80, pattern=r"^[A-Za-z0-9._-]{2,}@[A-Za-z]{2,}$"
+    ),
+]
+RiderName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=2, max_length=80)]
 
 
 class PremiumPredictRequest(BaseModel):
-    zone: str = "HSR Layout"
+    zone: ZoneName = "HSR Layout"
     forecast_features: Dict[str, Any] = Field(default_factory=dict)
     rider_features: Dict[str, Any] = Field(default_factory=dict)
     is_simulated: bool = False
@@ -15,10 +31,10 @@ class PremiumPredictRequest(BaseModel):
 
 
 class DemoBootstrapRequest(BaseModel):
-    rider_id: str
-    rider_name: Optional[str] = Field(default=None, alias="name")
-    zone: str = "HSR Layout"
-    upi_id: Optional[str] = None
+    rider_id: RiderId
+    rider_name: Optional[RiderName] = Field(default=None, alias="name")
+    zone: ZoneName = "HSR Layout"
+    upi_id: Optional[UpiId] = None
     exclusions_accepted: bool = True
     forecast_features: Dict[str, Any] = Field(default_factory=dict)
     rider_features: Dict[str, Any] = Field(default_factory=dict)
