@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.api.dependencies import now_utc, predict_premium
 from app.api.schemas import PremiumPredictRequest, ResolvePredictionRequest
+from app.api.constants import EXCLUSIONS, EXCLUSIONS_VERSION
 from app.core.database import get_db
 from app.core.models import Claim, Policy
 from app.services.forecast_service import generate_zone_forecast
@@ -276,6 +277,4 @@ def get_admin_predictions(db: Session = Depends(get_db)):
 
 @meta_router.get("/exclusions")
 def get_exclusions():
-    from app.api.constants import EXCLUSIONS, EXCLUSIONS_VERSION
-
     return {"version": EXCLUSIONS_VERSION, "items": EXCLUSIONS}

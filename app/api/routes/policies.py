@@ -2,7 +2,6 @@ from datetime import timedelta
 from io import BytesIO
 
 from fastapi import APIRouter, Depends, HTTPException
-from app.services.policy_service import activate_rider_policy, bootstrap_demo_rider
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -15,6 +14,7 @@ from app.api.routes.enrollment import get_policy_eligibility
 from app.core.database import get_db
 from app.core.models import AuditLog, Claim, Policy, Rider
 from app.services.policy_pdf import generate_ledger_pdf, generate_policy_pdf
+from app.services.policy_service import activate_rider_policy, bootstrap_demo_rider
 from app.triggers.weather_service import FIXTURE_VERSION
 
 policies_router = APIRouter(prefix="/policies", tags=["policies"])

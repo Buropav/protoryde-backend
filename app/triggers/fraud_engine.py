@@ -47,7 +47,7 @@ def _load_delhivery(zone: str) -> Dict[str, Any]:
         cancellation_rate = cancelled_orders / total_orders if total_orders > 0 else 0.0
 
     except Exception as e:
-        logger.warning(f"Failed to load real delhivery dataset: {e}")
+        logger.warning("Failed to load real delhivery dataset: %s", e)
         total_orders = 20
         cancelled_orders = 1
         cancellation_rate = 0.05

@@ -8,11 +8,15 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+
+
 class TriggerEvent(BaseModel):
     trigger_type: str
     value: float
     threshold: float
     breached: bool
+
+
 
 class PayoutResult(BaseModel):
     claim_id: str
@@ -21,6 +25,8 @@ class PayoutResult(BaseModel):
     processed_in_seconds: float
     smart_contract_hash: str = ""
     verification_url: str = ""
+
+
 
 class PayoutService:
     @staticmethod
@@ -47,7 +53,7 @@ class PayoutService:
         payload_str = json.dumps(hash_payload, sort_keys=True).encode('utf-8')
         tx_hash = "0x" + hashlib.sha256(payload_str).hexdigest()
 
-        logger.info(f"Push notification: Rs {payout_amount} transferred via UPI. UTR: {utr_number}")
+        logger.info("Push notification: Rs %s transferred via UPI. UTR: %s", payout_amount, utr_number)
 
         elapsed = time.time() - start_time
 

@@ -24,7 +24,7 @@ def poll_weather_and_auto_trigger():
             cond = WeatherService.get_current_conditions(zone, is_simulated=False)
             rain_value = cond["conditions"]["rain_24h_mm"]
             if rain_value >= 30.0:
-                logger.info(f"Threshold breached in {zone}. Auto-creating claim.")
+                logger.info("Threshold breached in %s. Auto-creating claim.", zone)
                 rider_id = f"rdr_auto_{zone[:3].lower()}"
                 res = FraudEngine.evaluate_claim(
                     zone=zone,
@@ -68,16 +68,16 @@ def poll_weather_and_auto_trigger():
                         )
                     )
                     db.commit()
-                    logger.info(f"Auto Claim persisted: {res['claim_id']}")
+                    logger.info("Auto Claim persisted: %s", res['claim_id'])
                 except Exception as db_exc:
                     db.rollback()
-                    logger.error(f"Failed to persist auto claim for {zone}: {db_exc}")
+                    logger.error("Failed to persist auto claim for %s: %s", zone, db_exc)
                 finally:
                     db.close()
             else:
-                logger.debug(f"{zone} conditions normal.")
+                logger.debug("%s conditions normal.", zone)
         except Exception as e:
-            logger.error(f"Failed to poll {zone}: {e}")
+            logger.error("Failed to poll %s: %s", zone, e)
 
 
 def retrain_ml_models_job():

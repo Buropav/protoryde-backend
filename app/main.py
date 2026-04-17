@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import logging
 import os
-import threading  # noqa: E402
+import threading
 from app.api import api_router
 from app.core.scheduler import start_scheduler
 from app.core.database import init_db
