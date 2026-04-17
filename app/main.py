@@ -41,22 +41,18 @@ app = FastAPI(
 )
 
 _origins_raw = os.getenv("ALLOWED_ORIGINS", "").strip()
+_allow_origins = [
+    "http://localhost:8080",
+    "https://protoryde-frontend.vercel.app",
+]
+
 if _origins_raw and _origins_raw != "*":
-    _allow_origins = [o.strip() for o in _origins_raw.split(",") if o.strip()]
-    _allow_credentials = True
-else:
-    # Default to wildcard only in development; log a warning for production awareness.
-    _allow_origins = ["*"]
-    _allow_credentials = False
-    if _origins_raw != "*":
-        logger.warning(
-            "ALLOWED_ORIGINS not set — CORS is wide open. Set it in production."
-        )
+    _allow_origins.extend([o.strip() for o in _origins_raw.split(",") if o.strip()])
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_allow_origins,
-    allow_credentials=_allow_credentials,
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
