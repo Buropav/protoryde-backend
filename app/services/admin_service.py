@@ -3,6 +3,7 @@ from sqlalchemy.sql import func
 from app.core.models import Policy, Claim
 from app.services.forecast_service import generate_zone_forecast
 
+
 def calculate_pool_health(db: Session) -> dict:
     active_policies_count = db.query(Policy).filter(Policy.status == "active").count()
 

@@ -4,12 +4,20 @@ from uuid import uuid4
 from typing import Dict, Any
 
 from app.api.constants import EXCLUSIONS_VERSION
-from app.api.dependencies import check_enrollment_lockout, ensure_rider_and_policy, predict_premium, now_utc
+from app.api.dependencies import (
+    check_enrollment_lockout,
+    ensure_rider_and_policy,
+    predict_premium,
+    now_utc,
+)
 from app.api.schemas import PolicyActivateRequest, DemoBootstrapRequest
 from app.core.models import Rider, AuditLog
 from app.triggers.weather_service import ZONES
 
-def activate_rider_policy(db: Session, payload: PolicyActivateRequest) -> Dict[str, Any]:
+
+def activate_rider_policy(
+    db: Session, payload: PolicyActivateRequest
+) -> Dict[str, Any]:
     if payload.zone not in ZONES:
         raise HTTPException(
             status_code=422,
@@ -83,6 +91,7 @@ def activate_rider_policy(db: Session, payload: PolicyActivateRequest) -> Dict[s
         if policy.exclusions_acknowledged_at
         else None,
     }
+
 
 def bootstrap_demo_rider(db: Session, payload: DemoBootstrapRequest) -> Rider:
     rider = db.query(Rider).filter(Rider.id == payload.rider_id).first()

@@ -9,7 +9,9 @@ RiderId = Annotated[
         strip_whitespace=True, min_length=3, max_length=64, pattern=r"^[A-Za-z0-9_.-]+$"
     ),
 ]
-ZoneName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=2, max_length=80)]
+ZoneName = Annotated[
+    str, StringConstraints(strip_whitespace=True, min_length=2, max_length=80)
+]
 
 
 class PolicyActivateRequest(BaseModel):

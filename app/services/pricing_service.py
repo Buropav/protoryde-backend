@@ -37,15 +37,45 @@ class PricingService:
         adjustments: List[Dict[str, Any]] = []
 
         if rain_prob >= 60:
-            adjustments.append({"factor": "rain_risk", "amount": 18.0, "reason": "7-day rain probability >= 60%"})
+            adjustments.append(
+                {
+                    "factor": "rain_risk",
+                    "amount": 18.0,
+                    "reason": "7-day rain probability >= 60%",
+                }
+            )
         if aqi_forecast_days >= 3:
-            adjustments.append({"factor": "aqi_risk", "amount": 12.0, "reason": "AQI forecast elevated for 3+ days"})
+            adjustments.append(
+                {
+                    "factor": "aqi_risk",
+                    "amount": 12.0,
+                    "reason": "AQI forecast elevated for 3+ days",
+                }
+            )
         if claim_rate < 1.0:
-            adjustments.append({"factor": "low_claim_rate", "amount": -10.0, "reason": "Claim rate below 1/month"})
+            adjustments.append(
+                {
+                    "factor": "low_claim_rate",
+                    "amount": -10.0,
+                    "reason": "Claim rate below 1/month",
+                }
+            )
         if fraud_flags == 0:
-            adjustments.append({"factor": "clean_fraud_record", "amount": -8.0, "reason": "No fraud flags"})
+            adjustments.append(
+                {
+                    "factor": "clean_fraud_record",
+                    "amount": -8.0,
+                    "reason": "No fraud flags",
+                }
+            )
         if first_month:
-            adjustments.append({"factor": "new_rider_loading", "amount": 5.0, "reason": "Insufficient rider history"})
+            adjustments.append(
+                {
+                    "factor": "new_rider_loading",
+                    "amount": 5.0,
+                    "reason": "Insufficient rider history",
+                }
+            )
 
         adjustment_total = round(sum(item["amount"] for item in adjustments), 2)
         final_premium = max(40.0, round(base + adjustment_total, 2))

@@ -302,7 +302,7 @@ def get_notifications(rider_id: str, db: Session = Depends(get_db)):
                 "title": log.action.replace("_", " ").title(),
                 "description": log.metadata_json.get("message", "System notification"),
                 "time": log.created_at.isoformat(),
-                "type": log.metadata_json.get("type", "INFO")
+                "type": log.metadata_json.get("type", "INFO"),
             }
             for log in rider_logs
         ]

@@ -177,13 +177,13 @@ def predict_premium_endpoint(
 @admin_router.get("/pool-health")
 def get_pool_health(db: Session = Depends(get_db)):
     from app.services.admin_service import calculate_pool_health
+
     try:
         return calculate_pool_health(db)
     except Exception as exc:
         raise HTTPException(
             status_code=500, detail={"error": "INTERNAL_ERROR", "message": str(exc)}
         )
-
 
 
 @forecast_router.get("/{zone}")

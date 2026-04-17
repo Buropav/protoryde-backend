@@ -68,10 +68,12 @@ def poll_weather_and_auto_trigger():
                         )
                     )
                     db.commit()
-                    logger.info("Auto Claim persisted: %s", res['claim_id'])
+                    logger.info("Auto Claim persisted: %s", res["claim_id"])
                 except Exception as db_exc:
                     db.rollback()
-                    logger.error("Failed to persist auto claim for %s: %s", zone, db_exc)
+                    logger.error(
+                        "Failed to persist auto claim for %s: %s", zone, db_exc
+                    )
                 finally:
                     db.close()
             else:

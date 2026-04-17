@@ -16,13 +16,19 @@ RecordId = Annotated[
 UpiId = Annotated[
     str,
     StringConstraints(
-        strip_whitespace=True, min_length=5, max_length=80, pattern=r"^[A-Za-z0-9._-]{2,}@[A-Za-z]{2,}$"
+        strip_whitespace=True,
+        min_length=5,
+        max_length=80,
+        pattern=r"^[A-Za-z0-9._-]{2,}@[A-Za-z]{2,}$",
     ),
 ]
 Phone = Annotated[
     str,
     StringConstraints(
-        strip_whitespace=True, min_length=10, max_length=16, pattern=r"^\+?[0-9]{10,15}$"
+        strip_whitespace=True,
+        min_length=10,
+        max_length=16,
+        pattern=r"^\+?[0-9]{10,15}$",
     ),
 ]
 

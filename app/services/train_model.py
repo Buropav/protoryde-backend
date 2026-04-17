@@ -24,40 +24,40 @@ def load_delhivery_data(seed: int = 42) -> pd.DataFrame:
 
     # Calculate a real-world proxy for zone risk based on logistics delays
     # (actual delivery time vs expected OSRM routing time)
-    safe_osrm = df['osrm_time'].replace(0, 1)  # avoid division by zero
-    delay_ratio = (df['actual_time'] / safe_osrm).fillna(1.0)
-    
+    safe_osrm = df["osrm_time"].replace(0, 1)  # avoid division by zero
+    delay_ratio = (df["actual_time"] / safe_osrm).fillna(1.0)
+
     # Normalize delay ratio into a zone risk score (0.1 to 1.0)
     normalized_risk = delay_ratio / 3.0
     zone_risk_score = np.clip(normalized_risk, 0.1, 1.0)
-    
+
     n_samples = len(df)
     rng = np.random.default_rng(seed)
-    
-    # While routing delay calculates real world 'Zone Risk', we simulate the other 
-    # external contextual factors (weather severity, rider claim history) 
+
+    # While routing delay calculates real world 'Zone Risk', we simulate the other
+    # external contextual factors (weather severity, rider claim history)
     # since they don't natively exist in a logistics routing database.
     weather_severity = rng.integers(0, 5, n_samples).astype(float)
     claim_history = rng.integers(0, 10, n_samples).astype(float)
-    
+
     # Try parsing month from trip_creation_time, fallback to synthetic if invalid
     try:
-        month = pd.to_datetime(df['trip_creation_time']).dt.month
+        month = pd.to_datetime(df["trip_creation_time"]).dt.month
         season_risk = np.where((month >= 6) & (month <= 9), 1.5, 0.5)
     except Exception:
         month = rng.integers(1, 13, n_samples).astype(float)
         season_risk = np.where((month >= 6) & (month <= 9), 1.5, 0.5)
-    
+
     # Construct historical Premium target variable for model to learn from
     premium_amount = (
         50
         + 60 * zone_risk_score
         + 12 * weather_severity
         - 4 * claim_history
-        + 15 * season_risk 
+        + 15 * season_risk
         + rng.normal(0, 5, n_samples)
     )
-    
+
     return pd.DataFrame(
         {
             "zone_risk_score": zone_risk_score,
@@ -126,18 +126,18 @@ def _build_training_data_from_db(db: Session, min_rows: int = 80) -> pd.DataFram
             zone_risk_score = 0.82
         else:
             zone_risk_score = 0.55
-        
+
         # Estimate season_risk for db claims based on current time (rough proxy)
         month = datetime.now(timezone.utc).month
         season_risk = 1.5 if 6 <= month <= 9 else 0.5
-        
+
         premium_amount = max(
             40.0,
             55.0
             + 65.0 * zone_risk_score
             + 14.0 * weather_severity
             - 3.5 * claim_history
-            + 15.0 * season_risk
+            + 15.0 * season_risk,
         )
         data.append(
             {

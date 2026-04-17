@@ -18,7 +18,9 @@ def _normalize_database_url(url: str) -> str:
 
 
 # Use DATABASE_URL when provided. Fall back to local SQLite to keep demo setup reliable.
-SQLALCHEMY_DATABASE_URL = _normalize_database_url(os.getenv("DATABASE_URL", "sqlite:///./protoryde.db"))
+SQLALCHEMY_DATABASE_URL = _normalize_database_url(
+    os.getenv("DATABASE_URL", "sqlite:///./protoryde.db")
+)
 CONNECT_ARGS = (
     {"check_same_thread": False, "timeout": 30}
     if SQLALCHEMY_DATABASE_URL.startswith("sqlite")
@@ -32,12 +34,14 @@ engine = create_engine(
 )
 
 if SQLALCHEMY_DATABASE_URL.startswith("sqlite"):
+
     @event.listens_for(engine, "connect")
     def _sqlite_pragmas(dbapi_connection, _connection_record):
         cursor = dbapi_connection.cursor()
         cursor.execute("PRAGMA journal_mode=WAL;")
         cursor.execute("PRAGMA busy_timeout = 30000;")
         cursor.close()
+
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
@@ -73,7 +77,10 @@ def init_db():
             wait = _INITIAL_BACKOFF_S * (2 ** (attempt - 1))
             logger.warning(
                 "DB connection attempt %d/%d failed (%s). Retrying in %ds...",
-                attempt, _MAX_RETRIES, exc, wait,
+                attempt,
+                _MAX_RETRIES,
+                exc,
+                wait,
             )
             time.sleep(wait)
 

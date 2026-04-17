@@ -9,13 +9,11 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-
 class TriggerEvent(BaseModel):
     trigger_type: str
     value: float
     threshold: float
     breached: bool
-
 
 
 class PayoutResult(BaseModel):
@@ -27,14 +25,13 @@ class PayoutResult(BaseModel):
     verification_url: str = ""
 
 
-
 class PayoutService:
     @staticmethod
     def process_trigger_payout(
         rider_id: str,
         trigger_event: TriggerEvent,
         fraud_result: Dict[str, Any],
-        db: Any
+        db: Any,
     ) -> PayoutResult:
         start_time = time.time()
 
@@ -47,13 +44,17 @@ class PayoutService:
             "trigger_type": trigger_event.trigger_type,
             "value": trigger_event.value,
             "amount": payout_amount,
-            "timestamp": start_time
+            "timestamp": start_time,
         }
-        
-        payload_str = json.dumps(hash_payload, sort_keys=True).encode('utf-8')
+
+        payload_str = json.dumps(hash_payload, sort_keys=True).encode("utf-8")
         tx_hash = "0x" + hashlib.sha256(payload_str).hexdigest()
 
-        logger.info("Push notification: Rs %s transferred via UPI. UTR: %s", payout_amount, utr_number)
+        logger.info(
+            "Push notification: Rs %s transferred via UPI. UTR: %s",
+            payout_amount,
+            utr_number,
+        )
 
         elapsed = time.time() - start_time
 
@@ -63,5 +64,7 @@ class PayoutService:
             utr_number=utr_number if payout_amount > 0 else "N/A",
             processed_in_seconds=round(elapsed, 4),
             smart_contract_hash=tx_hash if payout_amount > 0 else "N/A",
-            verification_url=f"https://polygonscan.com/tx/{tx_hash}" if payout_amount > 0 else ""
+            verification_url=f"https://polygonscan.com/tx/{tx_hash}"
+            if payout_amount > 0
+            else "",
         )
